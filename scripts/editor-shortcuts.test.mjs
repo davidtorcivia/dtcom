@@ -56,11 +56,19 @@ const documentShim = {
   execCommand: undefined,
 };
 
+// Uploads go through fetch. Record the calls and hand back what the real
+// /admin/images endpoint returns, so the insert path is exercised for real.
+const fetches = [];
+let uploadResponse = { url: '/images/abc123.png', markdown: '![](/images/abc123.png)' };
+
 const sandbox = {
   document: documentShim,
   window: { addEventListener(){}, location: { pathname: '/admin/posts/x/edit' } },
-  fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-  FormData: class {},
+  fetch: (url, opts) => {
+    fetches.push({ url, opts });
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(uploadResponse) });
+  },
+  FormData: class { append() {} },
   console,
 };
 sandbox.window.document = documentShim;
@@ -141,6 +149,69 @@ check('ctrl+q not handled', press('q'), false);
 check('unchanged', state().v, 'abc');
 check('plain b not handled', press('b', { ctrl: false }), false);
 check('still unchanged', state().v, 'abc');
+
+// --- image upload: drop, paste, and where the caret lands -------------------
+//
+// The caret position is the point. An image alone in its paragraph renders as a
+// <figure> whose caption is its alt text, so after an upload the caret has to
+// sit inside the empty ![] brackets — otherwise every dropped image ships
+// without a caption unless the author goes back and clicks between them.
+
+function fileOfType(type, name) {
+  return { type, name };
+}
+
+function fireDrop(files) {
+  const ev = {
+    dataTransfer: { files, types: ['Files'] },
+    preventDefault() {},
+  };
+  for (const fn of ta._listeners.drop || []) fn(ev);
+}
+
+function firePaste(items) {
+  const ev = { clipboardData: { items }, preventDefault() {} };
+  for (const fn of ta._listeners.paste || []) fn(ev);
+}
+
+// The upload chain is promise-based; let the microtasks drain.
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+console.log('image drop:');
+fetches.length = 0;
+setSel('Before. After.', 8, 8);
+fireDrop([fileOfType('image/png', 'shot.png')]);
+await settle();
+check('posts to /admin/images', fetches.map((f) => f.url), ['/admin/images']);
+check('sends credentials', fetches[0]?.opts?.credentials, 'same-origin');
+check('inserts the markdown', state().v, 'Before. ![](/images/abc123.png)After.');
+check('caret lands inside the alt brackets', [state().s, state().e], [10, 10]);
+
+// Typing straight after the drop must produce a caption.
+setSel(state().v.slice(0, state().s) + 'A wide shot' + state().v.slice(state().s), 0, 0);
+check('typed text becomes the alt', state().v, 'Before. ![A wide shot](/images/abc123.png)After.');
+
+console.log('non-image drop ignored:');
+fetches.length = 0;
+setSel('', 0, 0);
+fireDrop([fileOfType('application/pdf', 'paper.pdf')]);
+await settle();
+check('no upload attempted', fetches.length, 0);
+check('buffer untouched', state().v, '');
+
+console.log('image paste:');
+fetches.length = 0;
+setSel('', 0, 0);
+firePaste([{ kind: 'file', type: 'image/jpeg', getAsFile: () => fileOfType('image/jpeg', 'p.jpg') }]);
+await settle();
+check('uploads pasted image', fetches.length, 1);
+check('caret inside the brackets', [state().s, state().e], [2, 2]);
+
+console.log('pasting plain text is not an upload:');
+fetches.length = 0;
+firePaste([{ kind: 'string', type: 'text/plain', getAsFile: () => null }]);
+await settle();
+check('no upload attempted', fetches.length, 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

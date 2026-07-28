@@ -97,6 +97,7 @@ func Render(src string) (string, error) {
 	// would leave the second unmatched on a single pass.
 	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
 	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
+	out = captionImages(out)
 	return out, nil
 }
 
