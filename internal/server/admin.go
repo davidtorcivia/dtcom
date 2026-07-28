@@ -39,6 +39,8 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/links/{id}/delete", d.requireAuth(d.adminLinkDelete))
 	mux.HandleFunc("GET /admin/site", d.requireAuth(d.adminSiteEdit))
 	mux.HandleFunc("POST /admin/site", d.requireAuth(d.adminSiteSave))
+	mux.HandleFunc("POST /admin/site/favicon", d.requireAuth(d.adminFaviconUpload))
+	mux.HandleFunc("POST /admin/site/favicon/reset", d.requireAuth(d.adminFaviconReset))
 	mux.HandleFunc("POST /admin/images", d.requireAuth(d.adminImageUpload))
 	mux.HandleFunc("GET /admin/integrations", d.requireAuth(d.adminIntegrations))
 	mux.HandleFunc("POST /admin/tokens", d.requireAuth(d.adminTokenCreate))
@@ -88,8 +90,16 @@ func (d *Deps) adminReady(w http.ResponseWriter) bool {
 
 // adminData is the base map every admin page renders with. Every page must
 // carry a Title (consumed by the admin-header partial) plus its own fields.
-func adminData(title string, extra map[string]any) map[string]any {
+//
+// Favicon comes along so the admin chrome shows the same icon as the public
+// site. It is read defensively: the login page renders before the site config
+// is necessarily usable, and a nil config there should not panic the one page
+// an operator needs in order to fix things.
+func (d *Deps) adminData(title string, extra map[string]any) map[string]any {
 	out := map[string]any{"Title": title}
+	if site := d.Site(); site != nil {
+		out["Favicon"] = site.Favicon
+	}
 	for k, v := range extra {
 		out[k] = v
 	}
@@ -124,7 +134,7 @@ func (d *Deps) adminLoginForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	d.adminTmpls.render(w, "login", adminData("Login", nil))
+	d.adminTmpls.render(w, "login", d.adminData("Login", nil))
 }
 
 func (d *Deps) adminLogin(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +153,7 @@ func (d *Deps) adminLogin(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("login rate limited", "ip", d.clientIP(r))
 		w.Header().Set("Retry-After", "30")
 		w.WriteHeader(http.StatusTooManyRequests)
-		d.adminTmpls.render(w, "login", adminData("Login", map[string]any{
+		d.adminTmpls.render(w, "login", d.adminData("Login", map[string]any{
 			"Error": "Too many attempts. Wait a moment and try again.",
 		}))
 		return
@@ -154,7 +164,7 @@ func (d *Deps) adminLogin(w http.ResponseWriter, r *http.Request) {
 	if !d.Auth.CheckPasswordAndTOTP(r.FormValue("password"), r.FormValue("totp")) {
 		slog.Warn("failed admin login", "ip", d.clientIP(r))
 		w.WriteHeader(http.StatusUnauthorized)
-		d.adminTmpls.render(w, "login", adminData("Login", map[string]any{"Error": "Invalid credentials"}))
+		d.adminTmpls.render(w, "login", d.adminData("Login", map[string]any{"Error": "Invalid credentials"}))
 		return
 	}
 	if err := d.Auth.SetSession(w, "admin"); err != nil {
@@ -249,7 +259,7 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		rangeStart, rangeEnd = dayRows[0].Day, dayRows[len(dayRows)-1].Day
 	}
 
-	d.adminTmpls.render(w, "dashboard", adminData("Dashboard", map[string]any{
+	d.adminTmpls.render(w, "dashboard", d.adminData("Dashboard", map[string]any{
 		"Stats":         stats,
 		"Site":          d.Site(),
 		"PostCount":     published,
@@ -283,7 +293,7 @@ func (d *Deps) adminPostsList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	d.adminTmpls.render(w, "posts-list", adminData("Posts", map[string]any{"Articles": arts}))
+	d.adminTmpls.render(w, "posts-list", d.adminData("Posts", map[string]any{"Articles": arts}))
 }
 
 func (d *Deps) adminPostEdit(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +301,7 @@ func (d *Deps) adminPostEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.PathValue("slug")
-	data := adminData("New Post", nil)
+	data := d.adminData("New Post", nil)
 	if slug != "" {
 		a, err := d.findArticleBySlug(slug)
 		if err != nil {
@@ -360,7 +370,7 @@ func (d *Deps) renderPostEditError(w http.ResponseWriter, in articleInput, slug 
 		date = time.Now()
 	}
 	w.WriteHeader(http.StatusBadRequest)
-	d.adminTmpls.render(w, "post-edit", adminData("Edit Post", map[string]any{
+	d.adminTmpls.render(w, "post-edit", d.adminData("Edit Post", map[string]any{
 		"Error": cause.Error(),
 		"Article": build.Article{
 			Slug: slug, Title: in.Title, Date: date, Description: in.Description,
@@ -420,7 +430,7 @@ func (d *Deps) renderLinksList(w http.ResponseWriter, errMsg string) {
 		data["Error"] = errMsg
 		w.WriteHeader(http.StatusBadRequest)
 	}
-	d.adminTmpls.render(w, "links-list", adminData("Links", data))
+	d.adminTmpls.render(w, "links-list", d.adminData("Links", data))
 }
 
 func (d *Deps) adminLinkAdd(w http.ResponseWriter, r *http.Request) {
@@ -519,10 +529,22 @@ func (d *Deps) adminLinksStyle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) adminSiteEdit(w http.ResponseWriter, r *http.Request) {
+	d.renderSiteEdit(w, "")
+}
+
+// renderSiteEdit draws the Site page, optionally with an error banner. The
+// favicon upload posts here, so it needs a way to report a rejected file
+// without losing the rest of the page.
+func (d *Deps) renderSiteEdit(w http.ResponseWriter, errMsg string) {
 	if !d.adminReady(w) {
 		return
 	}
-	d.adminTmpls.render(w, "site-edit", adminData("Site Config", map[string]any{"Site": d.Site()}))
+	data := map[string]any{"Site": d.Site()}
+	if errMsg != "" {
+		data["Error"] = errMsg
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	d.adminTmpls.render(w, "site-edit", d.adminData("Site Config", data))
 }
 
 // adminSiteSave edits only the scalar/textarea fields exposed in the site form
