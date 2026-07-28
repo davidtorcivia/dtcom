@@ -21,8 +21,8 @@ nav:
 social:
   - { label: X,         href: "https://x.com/davidtorcivia",         icon: x }
   - { label: Instagram, href: "https://instagram.com/davidtorcivia", icon: instagram }
-  - { label: GitHub,    href: "https://github.com/dtorcivia",        icon: github }
-  - { label: Substack,  href: "https://substack.com",                icon: substack }
+  - { label: GitHub,    href: "https://github.com/davidtorcivia",    icon: github }
+  - { label: Substack,  href: "https://disinfozone.substack.com",    icon: substack }
   - { label: Contact,   href: "mailto:david@davidtorcivia.com",      icon: email }
 
 # Inbound feeds polled into /links. Subscribe from the admin Links page.
