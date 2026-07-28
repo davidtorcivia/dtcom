@@ -2,7 +2,7 @@ package feeds
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"davidtorcivia.com/dtcom/internal/siteconfig"
@@ -14,6 +14,11 @@ import (
 type Poller struct {
 	store *store.Store
 	fp    *gofeed.Parser
+	// OnPoll, if non-nil, is called after each Poll with the count of newly
+	// imported items. main.go wires it to trigger a rebuild when imported > 0
+	// so RSS-imported links surface on /links without waiting for some other
+	// event to trigger one.
+	OnPoll func(imported int)
 }
 
 func NewPoller(st *store.Store) *Poller {
@@ -21,9 +26,12 @@ func NewPoller(st *store.Store) *Poller {
 }
 
 // Poll fetches every enabled feed in site.RSSFeeds and upserts new items.
-// Returns the count of newly imported items; items whose href was already
-// present are counted as dedup (via store.UpsertRSSLink's inserted flag).
-func (p *Poller) Poll(site *siteconfig.Config) (int, error) {
+// Per-feed errors are logged via slog.Warn and skipped — one dead feed does
+// not block the others. Returns the count of newly imported items. Items whose
+// href was already present are counted as dedup (via store.UpsertRSSLink's
+// inserted flag). Items with disallowed href schemes (javascript:/data:) are
+// silently dropped by UpsertRSSLink.
+func (p *Poller) Poll(site *siteconfig.Config) int {
 	imported := 0
 	for _, f := range site.RSSFeeds {
 		if !f.Enabled {
@@ -31,7 +39,8 @@ func (p *Poller) Poll(site *siteconfig.Config) (int, error) {
 		}
 		feed, err := p.fp.ParseURLWithContext(f.URL, context.Background())
 		if err != nil {
-			return imported, fmt.Errorf("parse %s: %w", f.URL, err)
+			slog.Warn("rss feed parse failed (skipping)", "url", f.URL, "err", err)
+			continue
 		}
 		for _, item := range feed.Items {
 			sortDate := time.Now()
@@ -46,17 +55,22 @@ func (p *Poller) Poll(site *siteconfig.Config) (int, error) {
 				FeedURL:  f.URL,
 			})
 			if err != nil {
-				return imported, err
+				slog.Warn("rss link upsert failed", "url", f.URL, "err", err)
+				continue
 			}
 			if inserted {
 				imported++
 			}
 		}
 	}
-	return imported, nil
+	if p.OnPoll != nil {
+		p.OnPoll(imported)
+	}
+	return imported
 }
 
-// Start runs Poll on an interval until ctx is cancelled.
+// Start runs Poll on an interval until ctx is cancelled. Per-feed errors are
+// logged via slog.Warn inside Poll; ctx cancellation is the only exit.
 func (p *Poller) Start(ctx context.Context, site func() *siteconfig.Config, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -65,10 +79,7 @@ func (p *Poller) Start(ctx context.Context, site func() *siteconfig.Config, inte
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := p.Poll(site()); err != nil {
-				// logged by caller; ignore here
-				_ = err
-			}
+			p.Poll(site())
 		}
 	}
 }

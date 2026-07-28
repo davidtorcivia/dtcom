@@ -77,23 +77,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// poller — runs on interval until shutdown
+	// poller — runs on interval until shutdown. OnPoll fires after each Poll
+	// (both the initial one and every periodic tick); when imports happened it
+	// rebuilds so RSS-imported links surface on /links without waiting for
+	// some other event to trigger one.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	poller := feeds.NewPoller(st)
-	go poller.Start(ctx, siteFn, cfg.RSSInterval)
-	// initial poll, best-effort
-	go func() {
-		if n, err := poller.Poll(sitePtr.Load()); err != nil {
-			slog.Warn("initial RSS poll", "err", err)
-		} else if n > 0 {
-			slog.Info("initial RSS poll imported", "count", n)
-			// rebuild to surface new links on /links
+	poller.OnPoll = func(imported int) {
+		if imported > 0 {
+			slog.Info("rss poll imported", "count", imported)
 			if err := engine.Rebuild(); err != nil {
-				slog.Warn("rebuild after RSS poll", "err", err)
+				slog.Warn("rebuild after rss poll", "err", err)
 			}
 		}
-	}()
+	}
+	go poller.Start(ctx, siteFn, cfg.RSSInterval)
+	// initial poll, best-effort. Runs in its own goroutine so a slow feed on
+	// startup doesn't block serving. OnPoll rebuilds synchronously if imports
+	// happened — fine at startup.
+	go poller.Poll(sitePtr.Load())
 
 	// watcher — debounce + rebuild on content changes
 	watchEvents := make(chan string, 64)
