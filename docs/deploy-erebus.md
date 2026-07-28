@@ -1,24 +1,41 @@
 # Deploying dtcom on erebus
 
-The internal LAN deployment, and the checklist for pointing
-`davidtorcivia.com` at it.
+This is production. `davidtorcivia.com` serves this deployment.
 
 ## Current state
 
 | | |
 |---|---|
 | Path | `/nvme-mirror/apps/dtcom` |
-| URL (LAN) | `http://192.168.1.131:8102` |
+| URL | `https://davidtorcivia.com` |
 | Container | `dtcom-dtcom-1`, image `dtcom:latest` |
-| Published port | `0.0.0.0:8102 -> 8080` |
+| Published port | `127.0.0.1:8102 -> 8080` |
+| Ingress | Cloudflare Tunnel (`cloudflared`, systemd) → `127.0.0.1:8102` |
 | Runs as | uid/gid `1000:1000` |
 
 Port 8102 was picked because 8080–8101 are all taken on erebus. The
 container always listens on 8080 internally; only the host half of the
 mapping moved, via `DTCOM_PORT`.
 
-The site it replaces is still live: `fx-davidtorcivia` on port 2999, out
-of `/nvme-mirror/apps/davidtorcivia.com`. Nothing here touches it.
+**The port is bound to loopback, not the LAN.** The tunnel connects over
+`127.0.0.1`, so nothing else needs to reach it — and that is what makes
+`DTCOM_TRUST_PROXY=true` correct rather than dangerous. The server reads
+the client address from `CF-Connecting-IP`/`X-Forwarded-For`; if the port
+were reachable from the LAN, anything on the network could forge those
+headers to inflate view counts and walk past the login rate limiter.
+The two settings only make sense together.
+
+The consequence is that there is no `http://192.168.1.131:8102` any more.
+Reach the site and `/admin` through the domain. To get a LAN-reachable
+instance back for testing, set `DTCOM_BIND=0.0.0.0` **and**
+`DTCOM_TRUST_PROXY=false` together, never one without the other.
+
+The site this replaced, `fx-davidtorcivia` on port 2999, is stopped and
+its compose project torn down. Its database — the only copy of the two
+original posts in their source form — is preserved in two places:
+`/nvme-mirror/apps/davidtorcivia.com/data/db.sqlite` (in place) and a
+checksum-verified copy under
+`/nvme-mirror/apps/fx-davidtorcivia-final-backup-<timestamp>/`.
 
 ## The uid trap
 
@@ -80,9 +97,10 @@ slug, description, or tags — so those were supplied during migration:
 Bodies are otherwise byte-for-byte what fx serves. Descriptions and tags
 were drafted, not migrated; they are worth a read-through.
 
-`rss_feeds` in `site.yml` is empty. The live fx blogroll polls
-`https://divination.disinfo.zone/index.xml` if you want it back —
-subscribe from `/admin/links` rather than editing the file.
+`site.yml` now polls `https://disinfozone.substack.com/feed`. The old fx
+blogroll also polled `https://divination.disinfo.zone/index.xml` if you
+want that back — subscribe from `/admin/links` rather than editing the
+file, since the admin rewrites site.yml wholesale.
 
 Old fx URLs (`/posts/<id>/<slug>`) are not redirected; dtcom serves
 `/posts/<slug>`. Two posts, so this was judged not worth the code.
@@ -91,17 +109,23 @@ Old fx URLs (`/posts/<id>/<slug>`) are not redirected; dtcom serves
 
 `.env` on erebus, mode 600, generated on the host. Not in git.
 
-`DTCOM_TRUST_PROXY=true` while the port is published on `0.0.0.0`. Be
-aware of what that combination means: the server reads the client address
-from `CF-Connecting-IP` / `X-Forwarded-For`, so anything on the LAN can
-forge those headers to inflate view counts and bypass the login rate
-limiter. It is the correct setting once Cloudflare Tunnel is the only
-path in; until then the port is directly reachable.
+`DTCOM_TRUST_PROXY=true` paired with the loopback bind — see Current
+state for why those two travel together.
 
-Rotate by editing `.env` and running `docker compose up -d`. The API
-token can also be read from `/admin/integrations`, which additionally
-mints revocable per-client tokens — prefer those for anything but the
-bootstrap path.
+Anything here is rotated by editing `.env` and running
+`docker compose up -d`.
+
+The admin password and TOTP secret were generated during setup and shown
+once in plain text at that point. The admin panel is now reachable from
+the public internet, so if that transcript still exists anywhere it
+should not, rotate both: generate a new bcrypt hash and base32 secret,
+put them in `.env`, restart, and re-enroll the authenticator.
+
+`DTCOM_API_TOKEN` is the bootstrap token and deliberately cannot be
+revoked from the UI — it is the way back in if a managed token is
+withdrawn by mistake. Its current value is visible on
+`/admin/integrations`, which also mints revocable per-client tokens;
+prefer those for anything that is not the bootstrap path.
 
 ## Updating
 
@@ -128,25 +152,39 @@ Templates and static assets are bind-mounted, and the engine re-reads
 templates on every rebuild, so editing those takes effect without a
 rebuild of the image.
 
-## Cutover checklist
+## Editing CSS on a running site
 
-When you are satisfied with what is on 8102:
+Worth knowing, because it bit once. `static/` is bind-mounted, so a
+`git pull` changes the stylesheet the server hands out immediately — but
+the content hash in `<link href="/static/style.css?v=…">` is computed
+during a rebuild and does **not** update on its own. Pages then keep
+pointing at the old URL, and any cache holding that URL keeps serving the
+old bytes.
 
-1. Edit `.env`: `DTCOM_BASE_URL=https://davidtorcivia.com`.
-   This is what puts the real hostname into canonical links, `feed.xml`,
-   `sitemap.xml`, and OG tags, and it turns the session cookie's `Secure`
-   flag on. Once set, admin login over plain `http://192.168.1.131:8102`
-   stops working — reach `/admin` through the tunnel from then on.
-2. Optionally set `DTCOM_BIND=127.0.0.1` so the port is no longer exposed
-   to the LAN. With the tunnel as the only ingress, this is what makes
-   `DTCOM_TRUST_PROXY=true` safe.
-3. `docker compose up -d` to apply.
-4. Repoint the Cloudflare tunnel from port 2999 to port 8102.
-5. Verify `https://davidtorcivia.com/healthz`, one post, `/feed.xml`, and
-   an admin login.
-6. Stop the old site: `cd /nvme-mirror/apps/davidtorcivia.com && docker
-   compose down`. Keep `data/db.sqlite` — it is the only copy of the
-   original posts.
+Trigger a rebuild after pulling a CSS-only change: the admin's Regenerate
+button, `POST /api/v1/regenerate`, or the `regenerate` MCP tool. Confirm
+with:
+
+```bash
+curl -s http://127.0.0.1:8102/ | grep -oE 'style\.css\?v=[a-z0-9]+'
+sha256sum static/style.css | cut -c1-8   # must match the ?v= value
+```
+
+Go changes need a full `docker compose build` regardless, which rebuilds
+and refreshes the hash as a side effect.
+
+## Rolling back
+
+The old site is stopped, not deleted. To put it back:
+
+```bash
+cd /nvme-mirror/apps/davidtorcivia.com && docker compose up -d
+```
+
+That returns `fx` to port 2999; repoint the tunnel there. Do this before
+touching `dtcom`'s `content/`, since the two do not share storage and
+anything written through the new admin exists only under
+`/nvme-mirror/apps/dtcom/content/`.
 
 ## Backups
 
