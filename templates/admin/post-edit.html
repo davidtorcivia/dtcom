@@ -35,6 +35,12 @@
 <a href="/admin/posts" class="admin-cancel">Cancel</a>
 </div>
 </form>
+{{/* KaTeX is loaded unconditionally here, unlike on a published post: the
+     editor cannot know whether the draft has math until it is previewed, and
+     this page is the author-only admin. */}}
+<link rel="stylesheet" href="{{asset "/static/katex/katex.min.css"}}">
+<script src="{{asset "/static/katex/katex.min.js"}}" defer></script>
+<script src="{{asset "/static/math.js"}}" defer></script>
 <script src="{{asset "/static/editor.js"}}" defer></script>
 </main>
 {{template "admin-footer"}}

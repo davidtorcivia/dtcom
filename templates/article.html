@@ -25,6 +25,11 @@
   <meta name="twitter:creator" content="{{.}}">
   <meta name="twitter:site" content="{{.}}">{{end}}
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{$a.Title}}","description":"{{$a.Description}}","datePublished":"{{rfc3339 $a.Date}}","author":{"@type":"Person","name":"{{$site.Author}}"},"url":"{{.URL}}"}</script>
+  {{/* KaTeX only loads on posts that actually contain math — it is by far the
+       heaviest asset on the site, and most posts have none. */}}
+  {{if .HasMath}}<link rel="stylesheet" href="{{asset "/static/katex/katex.min.css"}}">
+  <script src="{{asset "/static/katex/katex.min.js"}}" defer></script>
+  <script src="{{asset "/static/math.js"}}" defer></script>{{end}}
   {{template "head-common" .}}
 </head>
 {{/* The view beacon's target is a data attribute rather than an inline
