@@ -44,8 +44,13 @@ func decodeJSONReader(r io.Reader, v any) error {
 }
 
 // updateSiteSection replaces one of the list-valued site.yml sections. It
-// reads the JSON body, mutates the live *siteconfig.Config (returned by
-// d.Site()), writes it back to disk, and rebuilds. The body is closed.
+// reads the JSON body, applies the change to a freshly-loaded copy (never the
+// live shared pointer), writes it back to disk, atomically swaps the
+// in-memory site via ReloadSite, and rebuilds. The body is closed.
+//
+// Mutating d.Site()'s return value directly would race the engine's reads
+// during a concurrent Rebuild, so we always work on a private copy and publish
+// it through ReloadSite's atomic pointer swap.
 func (d *Deps) updateSiteSection(section string, body io.Reader) error {
 	defer func() {
 		if c, ok := body.(io.Closer); ok {
@@ -53,7 +58,10 @@ func (d *Deps) updateSiteSection(section string, body io.Reader) error {
 		}
 	}()
 
-	site := d.Site()
+	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
+	if err != nil {
+		return statusErr(http.StatusInternalServerError, err)
+	}
 	switch section {
 	case "bio":
 		var v []string
@@ -91,8 +99,21 @@ func (d *Deps) updateSiteSection(section string, body io.Reader) error {
 	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
 		return statusErr(http.StatusInternalServerError, err)
 	}
+	if err := d.reloadSite(); err != nil {
+		return statusErr(http.StatusInternalServerError, err)
+	}
 	if err := d.Engine.Rebuild(); err != nil {
 		return statusErr(http.StatusInternalServerError, err)
 	}
 	return nil
+}
+
+// reloadSite re-reads site.yml and swaps the live site pointer. Falls back to
+// a no-op when Deps.ReloadSite is unset (e.g. minimal test fixtures) so the
+// public site and API keep working without the full main.go wiring.
+func (d *Deps) reloadSite() error {
+	if d.ReloadSite == nil {
+		return nil
+	}
+	return d.ReloadSite()
 }

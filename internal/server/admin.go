@@ -253,16 +253,28 @@ func (d *Deps) adminSiteEdit(w http.ResponseWriter, r *http.Request) {
 // (title, description, bio). The richer sections (nav/social/rss_feeds) are
 // managed via the REST API; mutating them through a freeform textarea would be
 // error-prone.
+//
+// As with updateSiteSection, we apply the edits to a freshly-loaded copy and
+// publish it via ReloadSite rather than mutating the live shared pointer,
+// which would race the engine's reads during Rebuild.
 func (d *Deps) adminSiteSave(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	site := d.Site()
+	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	site.Title = r.FormValue("title")
 	site.Description = r.FormValue("description")
 	site.Bio = splitLines(r.FormValue("bio"))
 	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := d.reloadSite(); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

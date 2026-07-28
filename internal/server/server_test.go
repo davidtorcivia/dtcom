@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"davidtorcivia.com/dtcom/internal/auth"
@@ -60,9 +61,25 @@ func newTestDeps(t *testing.T) *testDeps {
 		t.Fatal(err)
 	}
 
-	site, err := siteconfig.Load(filepath.Join(contentDir, "site.yml"))
+	siteYAMLPath := filepath.Join(contentDir, "site.yml")
+	site, err := siteconfig.Load(siteYAMLPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Hold the site in an atomic pointer so ReloadSite (exercised by the
+	// site-section PUT and admin save handlers) can swap in a fresh copy
+	// after writing site.yml — mirroring main.go's wiring and keeping the
+	// handlers free of shared mutable state.
+	var sitePtr atomic.Pointer[siteconfig.Config]
+	sitePtr.Store(site)
+	siteFn := func() *siteconfig.Config { return sitePtr.Load() }
+	reloadSite := func() error {
+		s, err := siteconfig.Load(siteYAMLPath)
+		if err != nil {
+			return err
+		}
+		sitePtr.Store(s)
+		return nil
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -88,7 +105,7 @@ func newTestDeps(t *testing.T) *testDeps {
 	engine := build.NewEngine(build.EngineConfig{
 		ContentDir:   contentDir,
 		PublicDir:    pubDir,
-		Site:         func() *siteconfig.Config { return site },
+		Site:         siteFn,
 		Store:        st,
 		TemplatesDir: filepath.Join("..", "..", "templates"),
 	})
@@ -99,12 +116,13 @@ func newTestDeps(t *testing.T) *testDeps {
 	a := auth.New(cfg.SessionKey, cfg.AdminPasswordHash, cfg.TOTPSecret)
 
 	d := &Deps{
-		Cfg:    cfg,
-		Site:   func() *siteconfig.Config { return site },
-		Store:  st,
-		Engine: engine,
-		Poller: feeds.NewPoller(st),
-		Auth:   a,
+		Cfg:        cfg,
+		Site:       siteFn,
+		ReloadSite: reloadSite,
+		Store:      st,
+		Engine:     engine,
+		Poller:     feeds.NewPoller(st),
+		Auth:       a,
 	}
 	return &testDeps{mux: New(d), deps: d, apiToken: "apitok", pubDir: pubDir}
 }
