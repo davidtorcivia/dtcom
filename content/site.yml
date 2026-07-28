@@ -25,8 +25,8 @@ social:
   - { label: Substack,  href: "https://substack.com",                icon: substack }
   - { label: Contact,   href: "mailto:david@davidtorcivia.com",      icon: email }
 
-rss_feeds:
-  - { url: "https://davidtorcivia.substack.com/feed", label: Substack, enabled: true }
+# Inbound feeds polled into /links. Subscribe from the admin Links page.
+rss_feeds: []
 
 footer_left:
   - "DAVID TORCIVIA 2026"
