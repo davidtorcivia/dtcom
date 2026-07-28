@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -198,5 +199,44 @@ func TestBotsIgnoredByBeacon(t *testing.T) {
 	// bot should still get 204 but no view recorded
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+// TestTrackBeaconCapsBody verifies the unauthenticated /api/track beacon caps
+// its request body. A beacon body beyond ~1 KB must not be read into memory;
+// the handler still returns 204 (it always does for any decode failure) but
+// must not store a view derived from the oversized body.
+func TestTrackBeaconCapsBody(t *testing.T) {
+	d := newTestDeps(t)
+	// 32 KB of garbage — well over the 1 KB cap.
+	big := make([]byte, 32<<10)
+	for i := range big {
+		big[i] = 'x'
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/track", bytes.NewReader(big))
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	rec := httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("status = %d, want 204 (beacon always returns 204)", rec.Code)
+	}
+	// sanity: a normal beacon still records a view after the cap is in place.
+	req2 := httptest.NewRequest(http.MethodPost, "/api/track", strings.NewReader(`{"path":"/posts/hello"}`))
+	req2.Header.Set("User-Agent", "Mozilla/5.0")
+	rec2 := httptest.NewRecorder()
+	d.mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusNoContent {
+		t.Errorf("normal beacon status = %d", rec2.Code)
+	}
+}
+
+// TestDecodeJSONCapsBody verifies decodeJSON rejects bodies over the 10 MB cap.
+// decodeJSON backs every authed API endpoint; the cap is a backstop so even an
+// authed client can't OOM the server by streaming a huge body.
+func TestDecodeJSONCapsBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/links", bytes.NewReader(make([]byte, (10<<20)+1)))
+	var v linkInput
+	if err := decodeJSON(req, &v); err == nil {
+		t.Error("decodeJSON: expected error for >10MB body, got nil")
 	}
 }

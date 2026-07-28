@@ -27,10 +27,15 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": http.StatusText(status)})
 }
 
-// decodeJSON reads and decodes the request body into v, rejecting unknown
-// fields so typos in client payloads surface as 400s instead of silent drops.
+// decodeJSON reads and decodes the request body into v, capping the body at
+// 10 MB to prevent memory exhaustion and rejecting unknown fields so typos in
+// client payloads surface as 400s instead of silent drops. A body exceeding
+// the cap surfaces as a 400 via MaxBytesReader's decoding error.
 func decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
+	// 10 MB: plenty for any reasonable article body, bounded so a hostile
+	// (even authed) client can't OOM the server by streaming a huge body.
+	r.Body = http.MaxBytesReader(nil, r.Body, 10<<20)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
