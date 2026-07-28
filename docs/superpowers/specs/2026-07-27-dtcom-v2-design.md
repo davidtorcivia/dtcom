@@ -448,6 +448,42 @@ that fill the same DOM structure.
 4. **pure-Go `modernc.org/sqlite`** chosen over CGO `mattn/go-sqlite3`
    for clean Docker builds. Marginal performance cost is irrelevant for a
    single-user site.
+5. **Go floor raised to 1.25.5** (was 1.22 in the original spec) because
+   `modernc.org/sqlite` v1.54+ and `mark3labs/mcp-go` v0.57+ both require
+   it. Dockerfile uses `golang:1.25-alpine`. No downside for a single-user
+   Docker deployment.
+
+---
+
+## Deferred follow-ups (from final code review, post-implementation)
+
+These were identified in the final cross-cutting review. None block merge;
+tracked here so they aren't lost.
+
+- **`build.ResizeImage` is implemented + tested but not wired into the
+  rebuild pipeline.** Spec §11 envisioned scanning article markdown for
+  local image refs, resizing into a cache, and rewriting refs. Currently
+  local uploads ship at full size via the `/images/` file server. Either
+  wire it in or remove the dead code — leaving it advertising a feature
+  the site doesn't have is the worst option.
+- **`internal/main.go` lives under `internal/` as `package main`.** Works
+  (`go build ./internal`) but the Go convention is `cmd/<name>/main.go`.
+  Cosmetic; defer unless other binaries are added.
+- **Watcher doesn't add new subdirectories** created after startup. Fine
+  for the current flat `content/posts/*.md` layout; revisit if articles
+  get nested (`content/posts/drafts/`).
+- **`http.FileServer` enables directory listing** for `/static/` and
+  `/images/`. Harmless but unintentional; suppress with a custom handler
+  if exposure of the upload dir matters.
+- **Session cookie `Secure: true`** blocks local non-HTTPS dev (cookie
+  not sent over `http://localhost`). Correct for production; document the
+  TLS-proxy requirement for local admin testing.
+- **`findArticleBySlug` loads + parses every article on each single-read
+  request.** Fine at dozens-of-articles scale; first performance
+  bottleneck if the corpus grows.
+- **TOTP has no documented recovery path** (no backup codes, no bypass).
+  Clock drift > 30s locks out the admin. Document a recovery procedure
+  (e.g. temporarily unset `DTCOM_TOTP_SECRET` to skip the second factor).
 
 ---
 
