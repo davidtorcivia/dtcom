@@ -1,0 +1,18 @@
+{{define "links-list"}}
+{{template "admin-header" .}}
+<main style="margin-top:2rem">
+<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1.5rem">Links</h2>
+<form method="post" action="/admin/links/add" style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
+<input name="label" placeholder="Label" style="padding:0.4rem;flex:1;min-width:120px">
+<input name="href" placeholder="https://…" style="padding:0.4rem;flex:2;min-width:200px">
+<button type="submit" style="padding:0.4rem 1rem;background:var(--accent-yellow);border:none;font-weight:700;cursor:pointer">Add</button>
+</form>
+<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
+{{range .Links}}<li style="display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:0.4rem 0;border-bottom:1px dashed var(--text-muted)">
+<span><a href="{{.Href}}">{{.Label}}</a> <em style="color:var(--text-muted);font-size:0.8rem">[{{.Source}}]</em></span>
+{{if eq .Source "manual"}}<form method="post" action="/admin/links/{{.ID}}/delete" onsubmit="return confirm('Delete this link?')"><button type="submit" style="background:none;color:var(--accent);cursor:pointer;border:none;font-family:var(--font-mono)">delete</button></form>{{end}}
+</li>{{end}}
+</ul>
+</main>
+{{template "admin-footer"}}
+{{end}}
