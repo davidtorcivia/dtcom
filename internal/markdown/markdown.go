@@ -68,7 +68,7 @@ func HasMath(renderedHTML string) bool {
 // Render converts markdown source to an HTML fragment.
 func Render(src string) (string, error) {
 	var buf bytes.Buffer
-	if err := md.Convert([]byte(src), &buf); err != nil {
+	if err := md.Convert([]byte(normalizeDisplayMath(src)), &buf); err != nil {
 		return "", err
 	}
 	out := buf.String()
@@ -86,3 +86,95 @@ func Render(src string) (string, error) {
 }
 
 var highlightRe = regexp.MustCompile(`(^|[^=])==([^=\n]+?)==([^=]|$)`)
+
+// --- display-math normalisation ---------------------------------------------
+//
+// The math extension only handles a $$ block whose formula spans its own lines.
+// Two forms it gets wrong, both silently:
+//
+//   - a formula written entirely on one line, "$$x = 1$$", renders EMPTY: the
+//     content is dropped and only the delimiters survive.
+//   - a formula on a single line between its own $$ markers has each doubled
+//     backslash — LaTeX's row separator — collapsed to a single one, which
+//     changes what the formula means.
+//
+// Both are rewritten here into the form that works: $$ on their own lines, with
+// the formula broken at its row separators. LaTeX ignores the added newlines,
+// so this changes how the source is parsed, not what it means.
+//
+// The two fixes have to ship together. Fixing only the first would turn a
+// formula like $$a \\ b$$ from visibly empty into quietly wrong, and quietly
+// wrong is the worse failure.
+
+var oneLineDisplayMath = regexp.MustCompile(`^([ \t]*)\$\$(.+?)\$\$[ \t]*$`)
+
+// splitMathRows puts each row of a LaTeX environment on its own line, breaking
+// at the doubled backslashes that separate them.
+func splitMathRows(body string) string {
+	return strings.ReplaceAll(strings.TrimSpace(body), `\\`, "\\\\\n")
+}
+
+// normalizeDisplayMath rewrites the two broken forms. Fenced code is skipped
+// outright: a shell snippet full of $$ is not math and must survive verbatim.
+func normalizeDisplayMath(src string) string {
+	lines := strings.Split(src, "\n")
+	out := make([]string, 0, len(lines))
+
+	fence := ""           // the ``` or ~~~ run that opened the current code block
+	mathOpen := false     // inside a $$ … $$ block
+	var mathBody []string // its lines, held back until the closing $$
+
+	flushMath := func(closing string) {
+		out = append(out, "$$")
+		joined := strings.TrimSpace(strings.Join(mathBody, "\n"))
+		if joined != "" {
+			out = append(out, strings.Split(splitMathRows(joined), "\n")...)
+		}
+		out = append(out, closing)
+		mathBody = nil
+	}
+
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+
+		if fence != "" {
+			out = append(out, line)
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if mathOpen {
+			if t == "$$" {
+				flushMath(line)
+				mathOpen = false
+				continue
+			}
+			mathBody = append(mathBody, line)
+			continue
+		}
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fence = t[:3]
+			out = append(out, line)
+			continue
+		}
+		if t == "$$" {
+			mathOpen = true
+			continue
+		}
+		if m := oneLineDisplayMath.FindStringSubmatch(line); m != nil && strings.TrimSpace(m[2]) != "" {
+			out = append(out, "$$")
+			out = append(out, strings.Split(splitMathRows(m[2]), "\n")...)
+			out = append(out, "$$")
+			continue
+		}
+		out = append(out, line)
+	}
+	// An unclosed $$ is a typo, not a formula. Put the source back as written
+	// rather than swallowing the rest of the post into a math block.
+	if mathOpen {
+		out = append(out, "$$")
+		out = append(out, mathBody...)
+	}
+	return strings.Join(out, "\n")
+}
