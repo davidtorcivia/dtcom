@@ -1,20 +1,27 @@
 {{define "search"}}<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Search — {{.Site.Title}}</title>
   <meta name="description" content="Search {{.Site.Title}}">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <script src="/static/app.js" defer></script>
+  <link rel="canonical" href="{{absURL .Site "/search"}}">
+  {{/* The page has no content of its own — results are fetched client-side —
+       so there is nothing here for an index to keep. */}}
+  <meta name="robots" content="noindex">
+  {{template "head-common" .}}
 </head>
-<body>
+<body data-track-path="/search">
+<a class="skip-link" href="#search-input">Skip to search</a>
 <div class="site-container">
   {{template "site-header" .}}
-  <main>
-    <div class="bio-section">
-      <p><input id="search-input" type="search" placeholder="Search articles…" autocomplete="off" style="width:100%;font-family:var(--font-sans);font-size:1rem;padding:0.5rem;"></p>
+  <main id="main">
+    <div class="search-box">
+      {{/* The label is for screen readers only — a visible "Search articles"
+           heading directly above a field whose placeholder says the same thing
+           is just the same words twice. */}}
+      <label class="visually-hidden" for="search-input">Search articles</label>
+      <input id="search-input" type="search" placeholder="Search articles…" autocomplete="off"
+             autocapitalize="off" spellcheck="false" aria-describedby="search-status">
+      <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
     </div>
     <div id="search-results" class="article-index-list"></div>
   </main>

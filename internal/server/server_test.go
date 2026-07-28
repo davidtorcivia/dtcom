@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
@@ -98,26 +99,39 @@ func newTestDeps(t *testing.T) *testDeps {
 		ContentDir:        contentDir,
 		StaticDir:         staticDir,
 		PublicDir:         pubDir,
+		TemplatesDir:      filepath.Join("..", "..", "templates"),
 		DBPath:            filepath.Join(t.TempDir(), "db"),
 		ImagesDir:         t.TempDir(),
 		SiteYAMLPath:      filepath.Join(contentDir, "site.yml"),
 	}
 
-	engine := build.NewEngine(build.EngineConfig{
+	fingerprints := assets.New(staticDir)
+	engine, err := build.NewEngine(build.EngineConfig{
 		ContentDir:   contentDir,
 		PublicDir:    pubDir,
+		StaticDir:    staticDir,
+		Assets:       fingerprints,
 		Site:         siteFn,
 		Store:        st,
 		TemplatesDir: filepath.Join("..", "..", "templates"),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
 
-	a := auth.New(cfg.SessionKey, cfg.AdminPasswordHash, cfg.TOTPSecret)
+	a := auth.New(auth.Options{
+		SessionKey:   cfg.SessionKey,
+		PasswordHash: cfg.AdminPasswordHash,
+		TOTPSecret:   cfg.TOTPSecret,
+		SecureCookie: true,
+	})
 
 	d := &Deps{
 		Cfg:        cfg,
+		Assets:     fingerprints,
 		Site:       siteFn,
 		ReloadSite: reloadSite,
 		Store:      st,

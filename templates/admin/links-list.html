@@ -1,18 +1,65 @@
 {{define "links-list"}}
 {{template "admin-header" .}}
-<main style="margin-top:2rem">
-<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1.5rem">Links</h2>
-<form method="post" action="/admin/links/add" style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap">
-<input name="label" placeholder="Label" style="padding:0.4rem;flex:1;min-width:120px">
-<input name="href" placeholder="https://…" style="padding:0.4rem;flex:2;min-width:200px">
-<button type="submit" style="padding:0.4rem 1rem;background:var(--accent-yellow);border:none;font-weight:700;cursor:pointer">Add</button>
+<main class="admin-main">
+<h2 class="admin-h2">Links</h2>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+
+<section class="admin-section">
+<h3 class="admin-h3">RSS subscriptions</h3>
+<p class="admin-hint">Every enabled feed is polled every {{.PollInterval}}; new items appear on
+<a href="/links" target="_blank" rel="noopener">/links</a> automatically. Items are deduplicated by URL, so
+re-polling is safe.</p>
+<form method="post" action="/admin/feeds/add" class="admin-add-form">
+<label class="admin-sr-only" for="f-url">Feed URL</label>
+<input id="f-url" name="url" type="url" placeholder="https://example.substack.com/feed" required>
+<label class="admin-sr-only" for="f-label">Label</label>
+<input id="f-label" name="label" placeholder="Label (optional)">
+<button type="submit">Subscribe</button>
 </form>
-<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
-{{range .Links}}<li style="display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:0.4rem 0;border-bottom:1px dashed var(--text-muted)">
-<span><a href="{{.Href}}">{{.Label}}</a> <em style="color:var(--text-muted);font-size:0.8rem">[{{.Source}}]</em></span>
-{{if eq .Source "manual"}}<form method="post" action="/admin/links/{{.ID}}/delete" onsubmit="return confirm('Delete this link?')"><button type="submit" style="background:none;color:var(--accent);cursor:pointer;border:none;font-family:var(--font-mono)">delete</button></form>{{end}}
-</li>{{end}}
+<ul class="admin-list feed-list">
+{{range $i, $f := .Feeds}}<li>
+<span class="feed-main">
+<span class="feed-state {{if $f.Enabled}}is-on{{end}}" aria-hidden="true"></span>
+<span class="feed-label">{{if $f.Label}}{{$f.Label}}{{else}}{{$f.URL}}{{end}}</span>
+<a class="feed-url" href="{{$f.URL}}" target="_blank" rel="noopener noreferrer">{{$f.URL}}</a>
+</span>
+<span class="feed-actions">
+<form method="post" action="/admin/feeds/{{$i}}/toggle"><button type="submit" class="admin-link-btn">{{if $f.Enabled}}pause{{else}}enable{{end}}</button></form>
+<form method="post" action="/admin/feeds/{{$i}}/remove" data-confirm="Unsubscribe from this feed?" data-confirm-detail="Links already imported stay on the site. New items will stop appearing." data-confirm-action="Unsubscribe"><button type="submit" class="admin-link-btn">remove</button></form>
+</span>
+</li>{{else}}<li class="admin-empty">No feeds subscribed. Paste a feed URL above — a Substack, a blog, anything that serves RSS or Atom.</li>{{end}}
 </ul>
+{{if .Feeds}}<form method="post" action="/admin/feeds/refresh" class="admin-actions"><button type="submit" class="admin-mini-btn">Poll all feeds now</button></form>{{end}}
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">Add a link by hand</h3>
+<form method="post" action="/admin/links/add" class="admin-add-form">
+<label class="admin-sr-only" for="l-label">Label</label>
+<input id="l-label" name="label" placeholder="Label" required>
+<label class="admin-sr-only" for="l-href">URL</label>
+<input id="l-href" name="href" type="url" placeholder="https://…" required>
+<label class="admin-sr-only" for="l-note">Note</label>
+<input id="l-note" name="note" placeholder="Note (optional)">
+<button type="submit">Add</button>
+</form>
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">All links</h3>
+<ul class="admin-list">
+{{range .Links}}<li>
+<span class="link-main">
+<a href="{{.Href}}" target="_blank" rel="noopener noreferrer">{{.Label}}</a>
+<em class="admin-source-flag">{{.Source}} · {{formatDateUnix .SortDate}}</em>
+{{with .Note}}<span class="link-note">{{.}}</span>{{end}}
+</span>
+{{/* RSS-imported links have no delete button: the store refuses to remove
+     them because the next poll would import them straight back. */}}
+{{if eq .Source "manual"}}<form method="post" action="/admin/links/{{.ID}}/delete" data-confirm="Delete this link?" data-confirm-detail="It will be removed from /links immediately." data-confirm-action="Delete link"><button type="submit" class="admin-link-btn">delete</button></form>{{end}}
+</li>{{else}}<li class="admin-empty">No links yet.</li>{{end}}
+</ul>
+</section>
 </main>
 {{template "admin-footer"}}
 {{end}}

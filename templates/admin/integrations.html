@@ -1,0 +1,123 @@
+{{define "integrations"}}
+{{template "admin-header" .}}
+<main class="admin-main">
+<h2 class="admin-h2">API &amp; MCP</h2>
+<p class="admin-lede">Everything on this site can be read and written over HTTP. The REST API and the MCP
+server share one bearer token — the <code>DTCOM_API_TOKEN</code> this process was started with.</p>
+
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+
+{{with .NewToken}}
+<div class="new-token" role="status">
+<h3 class="admin-h3">New token: {{.Name}}</h3>
+<p class="admin-hint"><strong>Copy it now.</strong> Only a hash is stored, so this is the one and only time
+the value is shown.</p>
+<div class="token-row">
+<code class="token token-new">{{.Value}}</code>
+<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.Value}}">Copy token</button>
+<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.MCPConfig}}">Copy MCP config</button>
+</div>
+</div>
+{{end}}
+
+<section class="admin-section">
+<h3 class="admin-h3">Tokens</h3>
+<p class="admin-hint">Each client — an MCP config, a script, a phone shortcut — should get its own token, so
+one can be withdrawn without disturbing the others. Only a hash is stored; a token's value is shown once, at
+creation.</p>
+
+<form method="post" action="/admin/tokens" class="admin-add-form">
+<label class="admin-sr-only" for="t-name">Token name</label>
+<input id="t-name" name="name" placeholder="What is this for? e.g. &ldquo;Claude Desktop&rdquo;" maxlength="60" required>
+<button type="submit">Create token</button>
+</form>
+
+<table class="endpoint-table token-table">
+<thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+<tbody>
+<tr class="token-env">
+<td>Bootstrap <em>(DTCOM_API_TOKEN)</em></td>
+{{/* This cell doubles as the reveal target, so the value appears where the
+     other tokens show their prefix instead of on a line of its own. */}}
+<td><code class="token-inline" id="api-token" data-token="{{.Token}}" data-mask="{{.TokenPrefix}}…">{{.TokenPrefix}}…</code></td>
+<td>from the environment</td>
+<td>—</td>
+<td><button type="button" class="admin-mini-btn" data-action="reveal" data-target="api-token">Reveal</button>
+<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.Token}}">Copy</button></td>
+</tr>
+{{range .Tokens}}<tr{{if not .Active}} class="token-revoked"{{end}}>
+<td>{{.Name}}</td>
+<td><code>{{.Prefix}}…</code></td>
+<td>{{formatDateUnix .CreatedAt}}</td>
+<td>{{if .LastUsedAt}}{{formatDateUnix .LastUsedAt}}{{else}}never{{end}}</td>
+<td>{{if .Active}}<form method="post" action="/admin/tokens/{{.ID}}/revoke"
+  data-confirm="Revoke &ldquo;{{.Name}}&rdquo;?"
+  data-confirm-detail="Any client using this token stops working immediately. This cannot be undone — issue a new token instead."
+  data-confirm-action="Revoke token"><button type="submit" class="admin-link-btn">revoke</button></form>{{else}}<span class="admin-source-flag">revoked {{formatDateUnix .RevokedAt}}</span>{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+<p class="admin-hint">The bootstrap token comes from the environment and cannot be revoked here — it is the
+way back in if a managed token is withdrawn by mistake. Rotate it by changing <code>DTCOM_API_TOKEN</code>
+and restarting.</p>
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">MCP client</h3>
+<p class="admin-hint">The <code>/mcp</code> endpoint speaks MCP over Streamable HTTP. Paste this into
+<code>claude_desktop_config.json</code> (or any MCP client's config). The transport is HTTP, so there is no
+<code>command</code> key.</p>
+<div class="code-block-wrap">
+<button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="{{.MCPConfig}}">Copy</button>
+<pre class="code-block"><code>{{.MCPConfigShown}}</code></pre>
+<p class="admin-hint">The token is masked above; <strong>Copy</strong> puts the real one on your clipboard.</p>
+</div>
+<h4 class="admin-h4">Tools exposed</h4>
+<div class="tool-grid">
+{{range .MCPTools}}<div class="tool-group">
+<span class="tool-group-name">{{.Name}}</span>
+<ul>{{range .Tools}}<li><code>{{.}}</code></li>{{end}}</ul>
+</div>{{end}}
+</div>
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">REST API</h3>
+<p class="admin-hint">Send the token as <code>Authorization: Bearer &lt;token&gt;</code>. Bodies and responses are JSON.</p>
+<div class="code-block-wrap">
+<button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="curl -H &#34;Authorization: Bearer {{.Token}}&#34; {{.BaseURL}}/api/v1/articles">Copy curl</button>
+<pre class="code-block"><code>curl -H "Authorization: Bearer $DTCOM_API_TOKEN" \
+  {{.BaseURL}}/api/v1/articles
+
+curl -X POST {{.BaseURL}}/api/v1/articles \
+  -H "Authorization: Bearer $DTCOM_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"A new post","body":"# Hello\n\nBody text.","tags":["essay"]}'</code></pre>
+</div>
+<table class="endpoint-table">
+<thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+<tbody>
+{{range .Endpoints}}<tr>
+<td><span class="method method-{{.Method}}">{{.Method}}</span></td>
+<td><code>{{.Path}}</code></td>
+<td>{{.Description}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">Public endpoints</h3>
+<p class="admin-hint">No token needed. Rate limited per client address.</p>
+<table class="endpoint-table">
+<tbody>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/api/search?q=</code></td><td>Full-text search over published articles.</td></tr>
+<tr><td><span class="method method-POST">POST</span></td><td><code>/api/track</code></td><td>Page-view beacon. Only accepts paths that exist.</td></tr>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/healthz</code></td><td>Liveness probe for a proxy or orchestrator.</td></tr>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}.md</code></td><td>Markdown source of any post.</td></tr>
+</tbody>
+</table>
+</section>
+</main>
+{{template "admin-footer"}}
+{{end}}

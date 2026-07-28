@@ -18,6 +18,22 @@ type Config struct {
 	Social      []SocialLink `yaml:"social"`
 	RSSFeeds    []RSSFeed    `yaml:"rss_feeds"`
 	FooterLeft  []string     `yaml:"footer_left"`
+
+	// LinksStyle controls how /links renders each entry: "full" shows the
+	// summary line under the title, "minimal" is date :: title only. Empty
+	// means "full".
+	LinksStyle string `yaml:"links_style"`
+}
+
+// Link list styles.
+const (
+	LinksStyleFull    = "full"
+	LinksStyleMinimal = "minimal"
+)
+
+// ShowLinkNotes reports whether /links should render each entry's summary.
+func (c *Config) ShowLinkNotes() bool {
+	return c != nil && c.LinksStyle != LinksStyleMinimal
 }
 
 type NavLink struct {

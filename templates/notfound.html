@@ -1,0 +1,26 @@
+{{/* Rendered to public/404.html and served by the catch-all route, so a wrong
+     URL lands on the site rather than on net/http's bare plain-text 404. */}}
+{{define "notfound"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Not found — {{.Site.Title}}</title>
+  <meta name="robots" content="noindex">
+  {{template "head-common" .}}
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="site-container">
+  {{template "site-header" .}}
+  <main id="main" class="notfound">
+    <h1 class="article-title-text">404</h1>
+    <p>That page isn't here. It may have been renamed, unpublished, or never existed.</p>
+    <nav class="notfound-links" aria-label="Where to go instead">
+      <a href="/">Home</a> <span class="dot-sep">·</span>
+      <a href="/search">Search</a> <span class="dot-sep">·</span>
+      <a href="/links">Links</a>
+    </nav>
+  </main>
+  {{template "site-footer" .}}
+</div>
+</body>
+</html>{{end}}

@@ -3,14 +3,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
@@ -21,26 +24,39 @@ import (
 	"davidtorcivia.com/dtcom/internal/watcher"
 )
 
-// Version is the build version, overridden via -ldflags.
-const Version = "dev"
+// Version is the build version. Declared as a var, not a const, so it can be
+// set at link time: go build -ldflags "-X main.Version=$(git rev-parse --short HEAD)".
+var Version = "dev"
+
+// rebuildDebounce is how long the watcher waits for the filesystem to settle
+// before rebuilding. Editors write in bursts (temp file, rename, chmod); one
+// rebuild per burst is the goal.
+const rebuildDebounce = 500 * time.Millisecond
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+	if err := run(); err != nil {
+		slog.Error("fatal", "err", err)
+		os.Exit(1)
+	}
+}
 
+// run holds the whole lifecycle so every deferred cleanup actually executes;
+// os.Exit in main would skip them.
+func run() error {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel(),
+	})))
 	slog.Info("starting dtcom", "version", Version)
 
 	cfg, err := config.FromEnv()
 	if err != nil {
-		slog.Error("config", "err", err)
-		os.Exit(1)
+		return err
 	}
 
 	// ensure dirs exist
-	for _, dir := range []string{cfg.PublicDir, cfg.DataDir, cfg.ImagesDir, cfg.ContentDir + "/posts"} {
+	for _, dir := range []string{cfg.PublicDir, cfg.DataDir, cfg.ImagesDir, filepath.Join(cfg.ContentDir, "posts")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			slog.Error("mkdir", "dir", dir, "err", err)
-			os.Exit(1)
+			return err
 		}
 	}
 
@@ -49,9 +65,12 @@ func main() {
 	// and without racing the engine's reads during Rebuild.
 	site, err := siteconfig.Load(cfg.SiteYAMLPath)
 	if err != nil {
-		slog.Error("site.yml", "err", err)
-		os.Exit(1)
+		return err
 	}
+	// The canonical URL is configured in one place — the environment — and
+	// site.yml's copy follows it, so the feed, sitemap, and OG tags can't
+	// disagree with the deployment.
+	site.BaseURL = cfg.BaseURL
 	var sitePtr atomic.Pointer[siteconfig.Config]
 	sitePtr.Store(site)
 	siteFn := func() *siteconfig.Config { return sitePtr.Load() }
@@ -59,30 +78,38 @@ func main() {
 	// store
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
-		slog.Error("store", "err", err)
-		os.Exit(1)
+		return err
 	}
 	defer st.Close()
 
+	// One fingerprinter shared by the engine (public pages) and the server
+	// (admin pages), so a rebuild refreshes the hashes both of them emit.
+	fingerprints := assets.New(cfg.StaticDir)
+
 	// engine
-	engine := build.NewEngine(build.EngineConfig{
+	engine, err := build.NewEngine(build.EngineConfig{
 		ContentDir:   cfg.ContentDir,
 		PublicDir:    cfg.PublicDir,
+		StaticDir:    cfg.StaticDir,
+		Assets:       fingerprints,
 		Site:         siteFn,
 		Store:        st,
-		TemplatesDir: "templates",
+		TemplatesDir: cfg.TemplatesDir,
 	})
-	if err := engine.Rebuild(); err != nil {
-		slog.Error("initial rebuild", "err", err)
-		os.Exit(1)
+	if err != nil {
+		return err
 	}
+	if err := engine.Rebuild(); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// poller — runs on interval until shutdown. OnPoll fires after each Poll
 	// (both the initial one and every periodic tick); when imports happened it
 	// rebuilds so RSS-imported links surface on /links without waiting for
 	// some other event to trigger one.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	poller := feeds.NewPoller(st)
 	poller.OnPoll = func(imported int) {
 		if imported > 0 {
@@ -94,43 +121,25 @@ func main() {
 	}
 	go poller.Start(ctx, siteFn, cfg.RSSInterval)
 	// initial poll, best-effort. Runs in its own goroutine so a slow feed on
-	// startup doesn't block serving. OnPoll rebuilds synchronously if imports
-	// happened — fine at startup.
-	go poller.Poll(sitePtr.Load())
+	// startup doesn't block serving.
+	go poller.Poll(ctx, siteFn())
 
 	// watcher — debounce + rebuild on content changes
 	watchEvents := make(chan string, 64)
 	w, err := watcher.Watch(cfg.ContentDir, watchEvents)
 	if err != nil {
-		slog.Error("watcher", "err", err)
-		os.Exit(1)
+		return err
 	}
 	defer w.Close()
-	go func() {
-		dirty := false
-		tick := time.NewTicker(500 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-watchEvents:
-				dirty = true
-			case <-tick.C:
-				if dirty {
-					dirty = false
-					if err := engine.Rebuild(); err != nil {
-						slog.Warn("watcher-triggered rebuild", "err", err)
-					} else {
-						slog.Info("rebuilt after content change")
-					}
-				}
-			}
-		}
-	}()
+	go watchLoop(ctx, watchEvents, engine)
 
 	// auth
-	a := auth.New(cfg.SessionKey, cfg.AdminPasswordHash, cfg.TOTPSecret)
+	a := auth.New(auth.Options{
+		SessionKey:   cfg.SessionKey,
+		PasswordHash: cfg.AdminPasswordHash,
+		TOTPSecret:   cfg.TOTPSecret,
+		SecureCookie: cfg.CookieSecure,
+	})
 
 	// server
 	handler := server.New(&server.Deps{
@@ -144,6 +153,7 @@ func main() {
 			if err != nil {
 				return err
 			}
+			s.BaseURL = cfg.BaseURL
 			sitePtr.Store(s)
 			return nil
 		},
@@ -151,30 +161,97 @@ func main() {
 		Engine: engine,
 		Poller: poller,
 		Auth:   a,
+		Assets: fingerprints,
 	})
 
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           handler,
+		Addr:    cfg.ListenAddr,
+		Handler: handler,
+		// Without these a single slow or idle client can hold a connection
+		// (and its goroutine) open indefinitely. WriteTimeout is generous
+		// because a rebuild-triggering API call does real work before it
+		// responds.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
+
+	// A failure to bind must end the process, not just log — otherwise the
+	// container stays "up" while serving nothing.
+	serveErr := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", cfg.ListenAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("listen", "err", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
 		}
 	}()
 
 	// graceful shutdown on SIGINT/SIGTERM
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	<-sig
-	slog.Info("shutting down")
+	select {
+	case err := <-serveErr:
+		return err
+	case s := <-sig:
+		slog.Info("shutting down", "signal", s.String())
+	}
 	cancel()
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown", "err", err)
+	}
+	return nil
+}
+
+// watchLoop coalesces filesystem events and rebuilds once the burst settles.
+// The timer is only armed while there is pending work, so an idle site does no
+// periodic wakeups at all.
+func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) {
+	timer := time.NewTimer(rebuildDebounce)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	pending := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-events:
+			// Restart the window on every event, so the rebuild happens once
+			// the writes stop rather than 500ms after they started — an editor
+			// saving a large file can still be writing at that point.
+			if pending && !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			pending = true
+			timer.Reset(rebuildDebounce)
+		case <-timer.C:
+			pending = false
+			if err := engine.Rebuild(); err != nil {
+				slog.Warn("watcher-triggered rebuild", "err", err)
+			} else {
+				slog.Info("rebuilt after content change")
+			}
+		}
+	}
+}
+
+// logLevel reads DTCOM_LOG_LEVEL (debug|info|warn|error), defaulting to info.
+func logLevel() slog.Level {
+	switch os.Getenv("DTCOM_LOG_LEVEL") {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }

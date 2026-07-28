@@ -1,15 +1,30 @@
-{{/* layout.html defines reusable partials (header, footer, bio) shared by
-     each self-contained page template (home.html, article.html, links.html,
-     search.html). Go html/template has no block inheritance; instead every
-     page template is a complete HTML document that includes these partials
-     via {{template "name" .}}. The data passed to each partial is the page's
-     top-level data, which must carry a .Site *siteconfig.Config. */}}
+{{/* layout.html defines reusable partials (head, header, footer, bio) shared
+     by each self-contained page template (home.html, article.html, links.html,
+     search.html, notfound.html). Go html/template has no block inheritance;
+     instead every page template is a complete HTML document that includes
+     these partials via {{template "name" .}}. The data passed to each partial
+     is the page's top-level data, which must carry a .Site *siteconfig.Config. */}}
+
+{{/* head-common carries everything every page needs in <head>. theme.js is
+     loaded synchronously (no defer) and ahead of the stylesheet so the stored
+     theme is applied before the first paint — deferring it made every visitor
+     on the dark theme see a white flash on each navigation. */}}
+{{define "head-common"}}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="{{asset "/static/theme.js"}}"></script>
+  <link rel="stylesheet" href="{{asset "/static/style.css"}}">
+  <link rel="icon" href="{{asset "/static/favicon.svg"}}" type="image/svg+xml">
+  <link rel="alternate" type="application/rss+xml" title="{{.Site.Title}}" href="/feed.xml">
+  <script src="{{asset "/static/app.js"}}" defer></script>
+{{end}}
+
 {{define "site-header"}}
-<header class="site-header">
+<header class="site-header" id="top">
   <div class="brand-title"><a href="/">{{.Site.Title}}</a></div>
-  <nav class="nav-right">
+  <nav class="nav-right" aria-label="Main">
     {{range .Site.Nav}}<a href="{{.Href}}" title="{{.Label}}"><span class="nav-text-label">{{.Label}}</span></a>{{end}}
-    <button id="theme-toggle-icon" class="theme-icon-btn" aria-label="Toggle light, dark, or system theme"></button>
+    <button id="theme-toggle-icon" class="theme-icon-btn" type="button" aria-label="Toggle light, dark, or system theme"></button>
   </nav>
 </header>
 {{end}}
@@ -17,21 +32,21 @@
 {{define "site-footer"}}
 <footer class="site-footer">
   <div class="footer-left">{{range $i, $f := .Site.FooterLeft}}{{if $i}} <span class="dot-sep">·</span> {{end}}<span>{{$f}}</span>{{end}}</div>
-  <div class="footer-links">
-    <a href="mailto:david@davidtorcivia.com">Contact</a>
+  <nav class="footer-links" aria-label="Site">
+    {{with contactHref .Site}}<a href="{{.}}">Contact</a>{{end}}
     <a href="/feed.xml">RSS</a>
     <a href="#top">TOP ↑</a>
-  </div>
+  </nav>
 </footer>
 {{end}}
 
 {{define "bio-section"}}
 <section class="bio-section">
   {{range .Site.Bio}}<p>{{. | htmlSafe}}</p>{{end}}
-  <div class="bio-social-links">
+  {{if .Site.Social}}<div class="bio-social-links">
     {{range $i, $s := .Site.Social}}{{if $i}}
     <span class="dot-sep">·</span>
-    {{end}}<a href="{{$s.Href}}" target="_blank" rel="noopener" title="{{$s.Label}}" aria-label="{{$s.Label}}">{{socialIcon $s.Icon}}</a>{{end}}
-  </div>
+    {{end}}<a href="{{$s.Href}}" target="_blank" rel="noopener noreferrer" title="{{$s.Label}}" aria-label="{{$s.Label}}">{{socialIcon $s.Icon}}</a>{{end}}
+  </div>{{end}}
 </section>
 {{end}}

@@ -15,7 +15,7 @@ func newTestDepsWithAdmin(t *testing.T) *testDeps {
 	t.Helper()
 	td := newTestDeps(t)
 	dir := filepath.Join("..", "..", "templates", "admin")
-	ts, err := newAdminTemplates(dir)
+	ts, err := newAdminTemplates(dir, td.deps.assets)
 	if err != nil {
 		t.Fatalf("load admin templates from %s: %v", dir, err)
 	}

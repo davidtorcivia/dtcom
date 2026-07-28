@@ -1,10 +1,16 @@
 services:
   dtcom:
-    build: .
+    build:
+      context: .
+      args:
+        VERSION: ${DTCOM_VERSION:-dev}
     image: dtcom:latest
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Bound to loopback: nothing here terminates TLS, so the port is meant to
+      # be reached through Cloudflare Tunnel or a local reverse proxy, not from
+      # the internet. Set DTCOM_BIND=0.0.0.0 to publish it directly.
+      - "${DTCOM_BIND:-127.0.0.1}:8080:8080"
     environment:
       DTCOM_BASE_URL: ${DTCOM_BASE_URL}
       DTCOM_ADMIN_PASSWORD_HASH: ${DTCOM_ADMIN_PASSWORD_HASH}
@@ -13,13 +19,36 @@ services:
       DTCOM_API_TOKEN: ${DTCOM_API_TOKEN}
       DTCOM_RSS_INTERVAL: ${DTCOM_RSS_INTERVAL:-30m}
       DTCOM_LISTEN_ADDR: ":8080"
+      DTCOM_LOG_LEVEL: ${DTCOM_LOG_LEVEL:-info}
+      # Behind a proxy the real client address arrives in a header. Leave this
+      # off if the port is published directly — otherwise any client can forge
+      # its own address and evade the login rate limiter.
+      DTCOM_TRUST_PROXY: ${DTCOM_TRUST_PROXY:-true}
+    # The container writes to /content (posts created via admin/API/MCP), so
+    # the bind mount below has to be writable by this uid. 65532 is the
+    # distroless "nonroot" user; override if the host directory is owned by
+    # someone else — `id -u`:`id -g` is usually what you want.
+    user: "${DTCOM_UID:-65532}:${DTCOM_GID:-65532}"
     volumes:
-      # content + templates + static are mounted for live editing;
-      # the file watcher inside the container picks up changes and rebuilds
+      # content is mounted read-write: the admin UI, REST API, and MCP tools
+      # all create and edit markdown files here.
       - ./content:/content
-      - ./static:/static
-      - ./templates:/templates
-      # data (SQLite db + uploaded images) is a named volume, persisted across rebuilds
+      # templates + static are mounted read-only for live editing; the engine
+      # re-reads templates on every rebuild, so an edit shows up without a
+      # restart.
+      - ./static:/static:ro
+      - ./templates:/templates:ro
+      # data (SQLite db + uploaded images) is a named volume, persisted across
+      # rebuilds
       - dtcom-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   dtcom-data:

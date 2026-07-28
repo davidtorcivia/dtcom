@@ -1,19 +1,25 @@
 {{define "login"}}<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>Login — Admin</title>
-<link rel="stylesheet" href="/static/style.css">
+<script src="{{asset "/static/theme.js"}}"></script>
+<link rel="stylesheet" href="{{asset "/static/style.css"}}">
+<link rel="stylesheet" href="{{asset "/static/admin.css"}}">
+<link rel="icon" href="{{asset "/static/favicon.svg"}}" type="image/svg+xml">
 </head>
 <body>
-<div class="site-container" style="max-width:480px;margin-top:10vh">
+<div class="site-container admin-login-container">
 <h1 class="article-title-text">Login</h1>
-{{if .Error}}<p style="color:var(--accent);font-family:var(--font-mono)">{{.Error}}</p>{{end}}
-<form method="post" action="/admin/login" style="display:flex;flex-direction:column;gap:0.75rem;margin-top:1.5rem">
-<input name="password" type="password" placeholder="Password" autocomplete="current-password" style="padding:0.5rem;font-family:var(--font-mono)">
-<input name="totp" type="text" placeholder="TOTP code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" style="padding:0.5rem;font-family:var(--font-mono)">
-<button type="submit" style="padding:0.5rem 1rem;background:var(--accent-yellow);border:none;font-family:var(--font-sans);font-weight:700;cursor:pointer">Login</button>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+<form method="post" action="/admin/login" class="admin-login-form">
+<label class="admin-sr-only" for="password">Password</label>
+<input id="password" name="password" type="password" placeholder="Password" autocomplete="current-password" required autofocus>
+<label class="admin-sr-only" for="totp">TOTP code</label>
+<input id="totp" name="totp" type="text" placeholder="TOTP code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+<button type="submit">Login</button>
 </form>
 </div>
 </body>

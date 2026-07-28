@@ -1,9 +1,22 @@
 package store
 
 import (
+	"errors"
 	"fmt"
+	"html"
 	"strings"
 	"time"
+	"unicode/utf8"
+)
+
+// Sentinel errors so callers can map a failure to the right HTTP status
+// without matching on driver message text.
+var (
+	// ErrDisallowedScheme means the href was empty or used a scheme that must
+	// never become a clickable link (javascript:, data:, vbscript:, …).
+	ErrDisallowedScheme = errors.New("link href has disallowed scheme or is empty")
+	// ErrDuplicateLink means a link with that href is already stored.
+	ErrDuplicateLink = errors.New("link href already exists")
 )
 
 type Link struct {
@@ -57,15 +70,24 @@ func (s *Store) AddLink(l Link) (int64, error) {
 	if l.CreatedAt == 0 {
 		l.CreatedAt = time.Now().Unix()
 	}
-	if sanitizeHref(l.Href) == "" {
-		return 0, fmt.Errorf("link href has disallowed scheme or is empty")
+	href := sanitizeHref(l.Href)
+	if href == "" {
+		return 0, ErrDisallowedScheme
+	}
+	if l.Label = strings.TrimSpace(l.Label); l.Label == "" {
+		return 0, fmt.Errorf("link label is required")
 	}
 	res, err := s.db.Exec(
 		`INSERT INTO links(label, href, note, source, sort_date, feed_url, created_at)
 		 VALUES(?,?,?,?,?,?,?)`,
-		l.Label, l.Href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
+		l.Label, href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
 	)
 	if err != nil {
+		// The href column carries a unique index; a repeat submission is an
+		// ordinary conflict, not a server fault.
+		if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
+			return 0, ErrDuplicateLink
+		}
 		return 0, fmt.Errorf("insert link: %w", err)
 	}
 	return res.LastInsertId()
@@ -80,16 +102,25 @@ func (s *Store) AddLink(l Link) (int64, error) {
 func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 	l.Source = "rss"
 	l.CreatedAt = time.Now().Unix()
-	if sanitizeHref(l.Href) == "" {
+	href := sanitizeHref(l.Href)
+	if href == "" {
 		// skip silently — RSS items with javascript:/data: hrefs are treated
 		// as already-present (dedup) so they don't appear on /links.
 		return 0, false, nil
 	}
+	// Feed titles and descriptions are attacker-influenced free text of
+	// arbitrary length; bound them before they reach the database and the
+	// rendered /links page.
+	l.Label = truncate(collapseSpace(plainText(l.Label)), maxLinkLabel)
+	if l.Label == "" {
+		l.Label = href
+	}
+	l.Note = truncate(collapseSpace(plainText(l.Note)), maxLinkNote)
 	res, err := s.db.Exec(
 		`INSERT INTO links(label, href, note, source, sort_date, feed_url, created_at)
 		 VALUES(?,?,?,?,?,?,?)
 		 ON CONFLICT DO NOTHING`,
-		l.Label, l.Href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
+		l.Label, href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
 	)
 	if err != nil {
 		return 0, false, fmt.Errorf("upsert rss link: %w", err)
@@ -97,19 +128,77 @@ func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		var id int64
-		_ = s.db.QueryRow("SELECT id FROM links WHERE href=?", l.Href).Scan(&id)
+		_ = s.db.QueryRow("SELECT id FROM links WHERE href=?", href).Scan(&id)
 		return id, false, nil
 	}
 	id, _ := res.LastInsertId()
 	return id, true, nil
 }
 
-func (s *Store) RemoveLink(id int64) error {
-	_, err := s.db.Exec("DELETE FROM links WHERE id=? AND source='manual'", id)
-	if err != nil {
-		return fmt.Errorf("remove link: %w", err)
+// Bounds on text imported from third-party feeds.
+const (
+	maxLinkLabel = 300
+	maxLinkNote  = 500
+)
+
+// plainText turns feed-supplied HTML into the plain text the links page
+// renders.
+//
+// Entities have to be decoded after the tags come out, or an apostrophe that
+// the feed wrote as &#39; survives into the database and is then escaped again
+// by the template — showing up on the page as a literal "&#39;".
+func plainText(s string) string {
+	return html.UnescapeString(stripTags(s))
+}
+
+// stripTags removes HTML markup from feed-supplied text. RSS descriptions are
+// commonly full HTML documents; the links page renders the note as plain text,
+// so the markup is noise at best.
+func stripTags(s string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range s {
+		switch {
+		case r == '<':
+			depth++
+		case r == '>' && depth > 0:
+			depth--
+		case depth == 0:
+			b.WriteRune(r)
+		}
 	}
-	return nil
+	return b.String()
+}
+
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	// Cut on a rune boundary so the stored string stays valid UTF-8.
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return strings.TrimSpace(s[:n]) + "…"
+}
+
+// RemoveLink deletes a manual link, reporting whether a row actually went
+// away. RSS-imported links are deliberately not deletable — the next poll
+// would re-import them — and the caller needs to know that so it can say so
+// instead of reporting a silent success.
+func (s *Store) RemoveLink(id int64) (bool, error) {
+	res, err := s.db.Exec("DELETE FROM links WHERE id=? AND source='manual'", id)
+	if err != nil {
+		return false, fmt.Errorf("remove link: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("remove link: %w", err)
+	}
+	return n > 0, nil
 }
 
 // ListLinks returns all links ordered by sort_date desc.

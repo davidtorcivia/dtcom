@@ -1,25 +1,29 @@
 {{define "links"}}<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Links — {{.Site.Title}}</title>
   <meta name="description" content="Links from {{.Site.Title}}">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <script src="/static/app.js" defer></script>
+  <link rel="canonical" href="{{absURL .Site "/links"}}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Links — {{.Site.Title}}">
+  <meta property="og:url" content="{{absURL .Site "/links"}}">
+  {{template "head-common" .}}
 </head>
-<body>
+<body data-track-path="/links">
+<a class="skip-link" href="#main">Skip to content</a>
 <div class="site-container">
   {{template "site-header" .}}
-  <main class="article-index-list">
+  <main class="article-index-list" id="main">
+    {{/* Every link here points off-site, so all of them open in a new tab —
+         not just the RSS-imported ones — and carry rel=noopener noreferrer. */}}
     {{range .Links}}<div class="index-row">
-      <a href="{{.Href}}" {{if eq .Source "rss"}}target="_blank" rel="noopener"{{end}}>
+      <a href="{{.Href}}" target="_blank" rel="noopener noreferrer">
         <span class="index-date">{{formatDateUnix .SortDate}}</span>
-        <span class="index-symbol-cell"><span class="index-symbol">::</span></span>
+        <span class="index-symbol-cell"><span class="index-symbol" aria-hidden="true">::</span></span>
         <span class="index-title">{{.Label}}</span>
       </a>
-    </div>{{end}}
+      {{if $.Site.ShowLinkNotes}}{{with .Note}}<p class="index-note">{{.}}</p>{{end}}{{end}}
+    </div>{{else}}<p class="empty-state">No links yet.</p>{{end}}
   </main>
   {{template "site-footer" .}}
 </div>
