@@ -9,15 +9,15 @@ import (
 )
 
 type Config struct {
-	Title       string        `yaml:"title"`
-	Author      string        `yaml:"author"`
-	BaseURL     string        `yaml:"base_url"`
-	Description string        `yaml:"description"`
-	Bio         []string      `yaml:"bio"`
-	Nav         []NavLink     `yaml:"nav"`
-	Social      []SocialLink  `yaml:"social"`
-	RSSFeeds    []RSSFeed     `yaml:"rss_feeds"`
-	FooterLeft  []string      `yaml:"footer_left"`
+	Title       string       `yaml:"title"`
+	Author      string       `yaml:"author"`
+	BaseURL     string       `yaml:"base_url"`
+	Description string       `yaml:"description"`
+	Bio         []string     `yaml:"bio"`
+	Nav         []NavLink    `yaml:"nav"`
+	Social      []SocialLink `yaml:"social"`
+	RSSFeeds    []RSSFeed    `yaml:"rss_feeds"`
+	FooterLeft  []string     `yaml:"footer_left"`
 }
 
 type NavLink struct {

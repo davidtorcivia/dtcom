@@ -8,20 +8,20 @@ import (
 )
 
 type Config struct {
-	BaseURL            string
-	ListenAddr         string
-	AdminPasswordHash  string
-	TOTPSecret         string
-	SessionKey         string
-	APIToken           string
-	RSSInterval        time.Duration
-	ContentDir         string
-	StaticDir          string
-	PublicDir          string
-	DataDir            string
-	SiteYAMLPath       string
-	DBPath             string
-	ImagesDir          string
+	BaseURL           string
+	ListenAddr        string
+	AdminPasswordHash string
+	TOTPSecret        string
+	SessionKey        string
+	APIToken          string
+	RSSInterval       time.Duration
+	ContentDir        string
+	StaticDir         string
+	PublicDir         string
+	DataDir           string
+	SiteYAMLPath      string
+	DBPath            string
+	ImagesDir         string
 }
 
 // FromEnv reads configuration from environment variables, applying defaults.
