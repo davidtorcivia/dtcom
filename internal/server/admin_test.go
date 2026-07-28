@@ -3,10 +3,13 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"davidtorcivia.com/dtcom/internal/siteconfig"
 )
 
 // newTestDepsWithAdmin is newTestDeps but with admin templates loaded from the
@@ -161,5 +164,52 @@ func TestAdminLoginBadCredentials(t *testing.T) {
 	d.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
+	}
+}
+
+// The Links page checkbox and the Site page dropdown write the same site.yml
+// key, so a round trip through the checkbox has to land in the file, in the
+// live config, and in the rebuilt /links page.
+//
+// The unchecked case is the one worth pinning down: a cleared checkbox submits
+// no field at all, and the handler reads that absence as "show the notes". Get
+// that backwards and the box becomes impossible to untick.
+func TestAdminLinksStyleCheckbox(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+
+	linksStyle := func() string {
+		t.Helper()
+		site, err := siteconfig.Load(d.deps.Cfg.SiteYAMLPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return site.LinksStyle
+	}
+
+	// Ticking the box hides the notes.
+	if rec := d.adminPost(t, "/admin/links/style", url.Values{"hide_notes": {"1"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("hide = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	if got := linksStyle(); got != siteconfig.LinksStyleMinimal {
+		t.Errorf("links_style = %q, want %q", got, siteconfig.LinksStyleMinimal)
+	}
+	if d.deps.Site().ShowLinkNotes() {
+		t.Error("live config still shows link notes after hiding them")
+	}
+
+	// The checkbox must render ticked so the page reflects the saved state.
+	if body := d.adminGet(t, "/admin/links").Body.String(); !strings.Contains(body, `name="hide_notes" value="1" checked`) {
+		t.Error("checkbox is not rendered checked while notes are hidden")
+	}
+
+	// Clearing it submits an empty form, which must restore the notes.
+	if rec := d.adminPost(t, "/admin/links/style", url.Values{}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("show = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	if got := linksStyle(); got != siteconfig.LinksStyleFull {
+		t.Errorf("links_style = %q, want %q", got, siteconfig.LinksStyleFull)
+	}
+	if !d.deps.Site().ShowLinkNotes() {
+		t.Error("live config still hides link notes after clearing the box")
 	}
 }

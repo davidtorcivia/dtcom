@@ -47,6 +47,13 @@ re-polling is safe.</p>
 
 <section class="admin-section">
 <h3 class="admin-h3">All links</h3>
+{{/* Writes links_style in site.yml — the same setting as the dropdown on the
+     Site page. An unchecked box posts nothing, which the handler reads as
+     "show the notes"; safe because this form has no other control. */}}
+<form method="post" action="/admin/links/style" class="admin-display-options">
+<label class="admin-checkbox"><input type="checkbox" name="hide_notes" value="1"{{if not .ShowLinkNotes}} checked{{end}}> Hide link descriptions — show date and title only</label>
+<button type="submit" class="admin-mini-btn">Apply</button>
+</form>
 <ul class="admin-list">
 {{range .Links}}<li>
 <span class="link-main">

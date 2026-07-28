@@ -35,6 +35,7 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/posts/{slug}/delete", d.requireAuth(d.adminPostDelete))
 	mux.HandleFunc("GET /admin/links", d.requireAuth(d.adminLinksList))
 	mux.HandleFunc("POST /admin/links/add", d.requireAuth(d.adminLinkAdd))
+	mux.HandleFunc("POST /admin/links/style", d.requireAuth(d.adminLinksStyle))
 	mux.HandleFunc("POST /admin/links/{id}/delete", d.requireAuth(d.adminLinkDelete))
 	mux.HandleFunc("GET /admin/site", d.requireAuth(d.adminSiteEdit))
 	mux.HandleFunc("POST /admin/site", d.requireAuth(d.adminSiteSave))
@@ -412,6 +413,8 @@ func (d *Deps) renderLinksList(w http.ResponseWriter, errMsg string) {
 		// Shown next to the feed list so the operator knows how long until
 		// the next automatic poll.
 		"PollInterval": d.Cfg.RSSInterval.String(),
+		// Drives the display-style checkbox below the link list.
+		"ShowLinkNotes": d.Site().ShowLinkNotes(),
 	}
 	if errMsg != "" {
 		data["Error"] = errMsg
@@ -469,6 +472,48 @@ func (d *Deps) adminLinkDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := d.Engine.Rebuild(); err != nil {
 		slog.Error("rebuild after link delete", "err", err)
+	}
+	http.Redirect(w, r, "/admin/links", http.StatusSeeOther)
+}
+
+// adminLinksStyle sets whether /links renders each entry's summary line, from
+// the checkbox on the Links page. It writes the same site.yml `links_style`
+// key as the dropdown on the Site page, so the two controls stay in agreement
+// by construction rather than by being kept in sync.
+//
+// An unchecked box submits no field at all, so a missing value means "show the
+// notes". That reading is only safe because this form carries exactly one
+// control: there is no way to submit it without having made a deliberate
+// choice about this setting. The Site page's dropdown needs the opposite
+// default (anything but an explicit "minimal" means full) because it posts
+// alongside several other fields.
+func (d *Deps) adminLinksStyle(w http.ResponseWriter, r *http.Request) {
+	if !parseAdminForm(w, r) {
+		return
+	}
+	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if r.FormValue("hide_notes") != "" {
+		site.LinksStyle = siteconfig.LinksStyleMinimal
+	} else {
+		site.LinksStyle = siteconfig.LinksStyleFull
+	}
+	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := d.reloadSite(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// /links is a static page, so the setting only becomes visible once the
+	// site is rebuilt.
+	if err := d.Engine.Rebuild(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	http.Redirect(w, r, "/admin/links", http.StatusSeeOther)
 }
