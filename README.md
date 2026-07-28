@@ -102,7 +102,7 @@ The `/mcp` endpoint speaks MCP over Streamable HTTP with bearer-token auth (the 
 
 For Claude Desktop, drop that block into `claude_desktop_config.json`. The transport is HTTP, not stdio — there is no `command`.
 
-Sixteen tools are exposed, grouped by what they touch:
+Seventeen tools are exposed, grouped by what they touch:
 
 | Group | Tools |
 |-------|-------|
