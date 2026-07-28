@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"davidtorcivia.com/dtcom/internal/feeds"
 	"davidtorcivia.com/dtcom/internal/markdown"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
@@ -58,25 +59,21 @@ func (e *Engine) Rebuild() error {
 			return fmt.Errorf("render %s: %w", a.Slug, err)
 		}
 	}
-	// NOTE: the following five render calls are added in Task 7.1 alongside
-	// their templates. For Task 5.2, comment them out so the test (which only
-	// checks article rendering) passes. Uncomment/implement in Task 7.1.
-	//
-	// if err := e.renderHome(arts); err != nil {
-	// 	return fmt.Errorf("render home: %w", err)
-	// }
-	// if err := e.renderLinks(); err != nil {
-	// 	return fmt.Errorf("render links: %w", err)
-	// }
-	// if err := e.renderFeed(arts); err != nil {
-	// 	return fmt.Errorf("render feed: %w", err)
-	// }
-	// if err := e.renderSitemap(arts); err != nil {
-	// 	return fmt.Errorf("render sitemap: %w", err)
-	// }
-	// if err := e.renderRobots(); err != nil {
-	// 	return fmt.Errorf("render robots: %w", err)
-	// }
+	if err := e.renderHome(arts); err != nil {
+		return fmt.Errorf("render home: %w", err)
+	}
+	if err := e.renderLinks(); err != nil {
+		return fmt.Errorf("render links: %w", err)
+	}
+	if err := e.renderFeed(arts); err != nil {
+		return fmt.Errorf("render feed: %w", err)
+	}
+	if err := e.renderSitemap(arts); err != nil {
+		return fmt.Errorf("render sitemap: %w", err)
+	}
+	if err := e.renderRobots(); err != nil {
+		return fmt.Errorf("render robots: %w", err)
+	}
 
 	// Spec §15 step 4: reindex search. Convert build.Article → store.IndexedArticle.
 	if e.cfg.Store != nil {
@@ -139,6 +136,90 @@ func (e *Engine) renderArticle(a Article, all []Article) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(e.cfg.PublicDir, "posts", a.Slug+".md"), src, 0o644)
+}
+
+// renderHome renders the front page: bio + a date-desc index of published
+// articles. Drafts are excluded.
+func (e *Engine) renderHome(arts []Article) error {
+	published := make([]Article, 0, len(arts))
+	for _, a := range arts {
+		if a.Draft {
+			continue
+		}
+		published = append(published, a)
+	}
+	return e.tmpls.render("home", filepath.Join(e.cfg.PublicDir, "index.html"), map[string]any{
+		"Site":     e.cfg.Site(),
+		"Articles": published,
+	})
+}
+
+// renderLinks renders the merged links index (manual + RSS-imported).
+func (e *Engine) renderLinks() error {
+	if e.cfg.Store == nil {
+		return nil
+	}
+	links, err := e.cfg.Store.ListLinks(500)
+	if err != nil {
+		return err
+	}
+	return e.tmpls.render("links", filepath.Join(e.cfg.PublicDir, "links", "index.html"), map[string]any{
+		"Site":  e.cfg.Site(),
+		"Links": links,
+	})
+}
+
+// renderFeed renders the outbound RSS feed (feed.xml) of published articles.
+func (e *Engine) renderFeed(arts []Article) error {
+	site := e.cfg.Site()
+	feedArts := make([]feeds.Article, 0, len(arts))
+	for _, a := range arts {
+		if a.Draft {
+			continue
+		}
+		feedArts = append(feedArts, feeds.Article{
+			Title:       a.Title,
+			Slug:        a.Slug,
+			Date:        a.Date,
+			Description: a.Description,
+		})
+	}
+	out, err := feeds.RenderFeed(site, feedArts)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(e.cfg.PublicDir, "feed.xml"), []byte(out), 0o644)
+}
+
+// renderSitemap writes sitemap.xml covering the home, links, search, and each
+// published article.
+func (e *Engine) renderSitemap(arts []Article) error {
+	site := e.cfg.Site()
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	sb.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
+	addURL := func(loc string) {
+		sb.WriteString("  <url><loc>" + loc + "</loc></url>\n")
+	}
+	addURL(site.BaseURL + "/")
+	addURL(site.BaseURL + "/links")
+	addURL(site.BaseURL + "/search")
+	for _, a := range arts {
+		if a.Draft {
+			continue
+		}
+		addURL(site.BaseURL + "/posts/" + a.Slug)
+	}
+	sb.WriteString("</urlset>\n")
+	return os.WriteFile(filepath.Join(e.cfg.PublicDir, "sitemap.xml"), []byte(sb.String()), 0o644)
+}
+
+// renderRobots writes robots.txt allowing crawlers everywhere except the
+// dynamic admin/api/mcp subtrees, and points at the sitemap.
+func (e *Engine) renderRobots() error {
+	site := e.cfg.Site()
+	body := "User-agent: *\nDisallow: /admin\nDisallow: /api\nDisallow: /mcp\nAllow: /\nAllow: *.md*\n\nSitemap: " + site.BaseURL + "/sitemap.xml\n"
+	return os.WriteFile(filepath.Join(e.cfg.PublicDir, "robots.txt"), []byte(body), 0o644)
 }
 
 // stripMarkdown is a minimal markdown stripper for the search index body:

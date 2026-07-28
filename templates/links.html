@@ -1,0 +1,27 @@
+{{define "links"}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Links — {{.Site.Title}}</title>
+  <meta name="description" content="Links from {{.Site.Title}}">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="site-container">
+  {{template "site-header" .}}
+  <main class="article-index-list">
+    {{range .Links}}<div class="index-row">
+      <a href="{{.Href}}" {{if eq .Source "rss"}}target="_blank" rel="noopener"{{end}}>
+        <span class="index-date">{{formatDateUnix .SortDate}}</span>
+        <span class="index-symbol-cell"><span class="index-symbol">::</span></span>
+        <span class="index-title">{{.Label}}</span>
+      </a>
+    </div>{{end}}
+  </main>
+  {{template "site-footer" .}}
+</div>
+</body>
+</html>{{end}}
