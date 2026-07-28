@@ -69,7 +69,7 @@ func (d *Deps) renderIntegrations(w http.ResponseWriter, errMsg string, newToken
 	if newToken != nil {
 		data["NewToken"] = newToken
 	}
-	d.adminTmpls.render(w, "integrations", adminData("API & MCP", data))
+	d.adminTmpls.render(w, "integrations", d.adminData("API & MCP", data))
 }
 
 // adminTokenCreate mints a managed token and renders it once.

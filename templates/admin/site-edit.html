@@ -2,6 +2,24 @@
 {{template "admin-header" .}}
 <main class="admin-main">
 <h2 class="admin-h2">Site Config</h2>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+
+{{/* Its own form: this one posts multipart to a different endpoint, and the
+     main config form below must not become multipart just to carry a file. */}}
+<section class="admin-section">
+<h3 class="admin-h3">Favicon</h3>
+<div class="admin-favicon-row">
+<img class="admin-favicon-preview" src="{{if $s.Favicon}}{{$s.Favicon}}{{else}}{{asset "/static/favicon.svg"}}{{end}}" alt="Current favicon" width="32" height="32">
+<span class="admin-hint">{{if $s.Favicon}}Custom favicon.{{else}}Using the built-in favicon.{{end}} PNG, JPEG, GIF, WebP, or SVG — up to 1&nbsp;MB. Raster files are re-encoded and capped at 512px.</span>
+</div>
+<form method="post" action="/admin/site/favicon" enctype="multipart/form-data" class="admin-add-form">
+<label class="admin-sr-only" for="s-favicon">Favicon file</label>
+<input id="s-favicon" name="favicon" type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,image/png,image/jpeg,image/gif,image/webp,image/svg+xml" required>
+<button type="submit">Upload</button>
+</form>
+{{if $s.Favicon}}<form method="post" action="/admin/site/favicon/reset" class="admin-actions" data-confirm="Reset the favicon?" data-confirm-detail="The site goes back to the built-in icon. The uploaded file is kept." data-confirm-action="Reset"><button type="submit" class="admin-mini-btn">Reset to built-in</button></form>{{end}}
+</section>
+
 <form method="post" action="/admin/site" class="admin-form">
 <label class="admin-label" for="s-title">Title</label>
 <input id="s-title" name="title" value="{{$s.Title}}" class="admin-input">

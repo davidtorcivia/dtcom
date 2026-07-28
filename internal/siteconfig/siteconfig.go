@@ -24,6 +24,15 @@ type Config struct {
 	// summary line under the title, "minimal" is date :: title only. Empty
 	// means "full".
 	LinksStyle string `yaml:"links_style"`
+
+	// Favicon is the site-relative URL of an uploaded favicon, e.g.
+	// "/images/<hash>.png". Empty means the built-in /static/favicon.svg.
+	//
+	// It holds a URL rather than a filename because the file lives in the
+	// data volume next to post images and is served by the same handler with
+	// the same immutable-cache header — the name is a content hash, so a new
+	// favicon is a new URL and no cache ever has to be invalidated.
+	Favicon string `yaml:"favicon"`
 }
 
 // Link list styles.
