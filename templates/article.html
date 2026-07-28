@@ -1,0 +1,35 @@
+{{define "article"}}{{$a := .Article}}{{$site := .Site}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{$a.Title}} — {{$site.Title}}</title>
+  <meta name="description" content="{{$a.Description}}">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="alternate" type="application/rss+xml" title="{{$site.Title}}" href="/feed.xml">
+  <link rel="alternate" type="text/markdown" href="/posts/{{$a.Slug}}.md">
+  <meta property="og:title" content="{{$a.Title}}">
+  <meta property="og:description" content="{{$a.Description}}">
+  <meta property="og:url" content="{{.URL}}">
+  <meta property="og:type" content="article">
+  <meta property="og:image" content="{{ogImage $a $site}}">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{$a.Title}}","datePublished":"{{formatDate $a.Date}}","author":{"@type":"Person","name":"{{$site.Author}}"},"url":"{{.URL}}"}</script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="site-container">
+  {{template "site-header" .}}
+  <div class="article-header">
+    <h1 class="article-title-text">{{$a.Title}}</h1>
+    <div class="article-meta-date">{{formatDate $a.Date}}</div>
+  </div>
+  <article class="article-prose-body">
+    {{.HTML | htmlSafe}}
+  </article>
+  {{template "site-footer" .}}
+</div>
+<script>window.trackPath = '/posts/{{$a.Slug}}';</script>
+</body>
+</html>{{end}}

@@ -1,0 +1,7 @@
+.git
+public/
+data/
+.env
+.vscode
+.idea
+*.swp

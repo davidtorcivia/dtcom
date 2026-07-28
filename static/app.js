@@ -23,6 +23,48 @@ document.addEventListener('DOMContentLoaded', () => {
       applyTheme('auto');
     }
   });
+
+  // === View beacon ===
+  // Fires once per page load (not on bots — the server filters those too, but
+  // skipping the beacon entirely saves the request). trackPath is set inline in
+  // the article template via a <script>window.trackPath = '/posts/foo'</script>.
+  if (navigator.userAgent && /bot|crawler|spider|slurp|googlebot|bingbot|duckduckbot|gptbot|claudebot/i.test(navigator.userAgent)) {
+    // skip
+  } else if (window.trackPath) {
+    navigator.sendBeacon('/api/track', JSON.stringify({ path: window.trackPath }));
+  }
+
+  // === Search (only runs on /search, where #search-input exists) ===
+  var input = document.getElementById('search-input');
+  if (input) {
+    var results = document.getElementById('search-results');
+    var timer;
+    input.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        var q = input.value.trim();
+        if (!q) { results.innerHTML = ''; return; }
+        fetch('/api/search?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (hits) {
+            if (!hits || !hits.length) {
+              results.innerHTML = '<div class="index-row"><span style="color:var(--text-muted)">No results.</span></div>';
+              return;
+            }
+            results.innerHTML = hits.map(function (h) {
+              var excerpt = h.Excerpt
+                ? '<span style="display:block;color:var(--text-muted);font-size:0.8rem;margin-top:0.25rem">' + h.Excerpt + '</span>'
+                : '';
+              return '<div class="index-row"><a href="/posts/' + h.Slug + '">' +
+                     '<span class="index-date">::</span>' +
+                     '<span class="index-title">' + h.Title + '</span>' +
+                     '</a>' + excerpt + '</div>';
+            }).join('');
+          })
+          .catch(function () { results.innerHTML = '<div class="index-row"><span style="color:var(--accent)">Search error.</span></div>'; });
+      }, 150);
+    });
+  }
 });
 
 function applyTheme(mode) {

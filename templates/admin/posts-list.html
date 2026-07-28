@@ -1,0 +1,16 @@
+{{define "posts-list"}}
+{{template "admin-header" .}}
+<main style="margin-top:2rem">
+<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1rem">
+<h2 style="font-family:var(--font-sans);text-transform:uppercase">Posts</h2>
+<a href="/admin/posts/new" style="background:var(--accent-yellow);padding:0.3rem 0.8rem;font-weight:700;text-decoration:none">+ New</a>
+</div>
+<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
+{{range .Articles}}<li style="display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:0.5rem 0;border-bottom:1px dashed var(--text-muted)">
+<span><span style="color:var(--text-muted)">{{.Date.Format "2006-01-02"}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em style="color:var(--accent)">(draft)</em>{{end}}</span>
+<form method="post" action="/admin/posts/{{.Slug}}/delete" onsubmit="return confirm('Delete {{.Title}}?')"><button type="submit" style="background:none;color:var(--accent);cursor:pointer;border:none;font-family:var(--font-mono)">delete</button></form>
+</li>{{end}}
+</ul>
+</main>
+{{template "admin-footer"}}
+{{end}}
