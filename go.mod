@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/adrg/frontmatter v0.2.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mark3labs/mcp-go v0.57.0
 	github.com/mmcdole/gofeed v1.4.0
 	github.com/pquerna/otp v1.5.0
