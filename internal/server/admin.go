@@ -47,6 +47,7 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/tokens/{id}/revoke", d.requireAuth(d.adminTokenRevoke))
 	mux.HandleFunc("POST /admin/regenerate", d.requireAuth(d.adminRegenerate))
 	registerAdminFeeds(mux, d)
+	registerAdminSiteLists(mux, d)
 }
 
 // requireAuth redirects unauthenticated requests to the login page and rejects
@@ -539,7 +540,13 @@ func (d *Deps) renderSiteEdit(w http.ResponseWriter, errMsg string) {
 	if !d.adminReady(w) {
 		return
 	}
-	data := map[string]any{"Site": d.Site()}
+	data := map[string]any{
+		"Site": d.Site(),
+		// Offered as a dropdown in the social-link form: an unknown icon
+		// renders as nothing, so free text would let a typo produce an
+		// invisible link.
+		"Icons": build.SocialIconNames(),
+	}
 	if errMsg != "" {
 		data["Error"] = errMsg
 		w.WriteHeader(http.StatusBadRequest)

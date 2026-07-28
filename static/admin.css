@@ -338,6 +338,55 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
 .admin-add-form input { flex: 1; min-width: 140px; width: auto; }
 .admin-add-form input[name="href"] { flex: 2; min-width: 220px; }
 .admin-add-form button { flex: 0 0 auto; }
+.admin-add-form select { flex: 0 0 auto; width: auto; }
+
+/* File inputs.
+   The native control is a browser-drawn button plus a filename, and it ignores
+   almost every property set on the input itself — it has to be styled through
+   ::file-selector-button. Left alone it was the one chrome-coloured widget in
+   the admin, and it read as broken next to everything else. */
+input[type="file"] {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  padding: 0;
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid var(--text-muted) !important;
+  border-radius: 1px;
+  padding: 0.4rem 0.9rem;
+  margin-right: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--accent-yellow);
+  color: #111;
+}
+
+input[type="file"]:focus-visible::file-selector-button {
+  outline: 2px solid var(--accent-yellow);
+  outline-offset: 1px;
+}
+
+/* Label column in the nav/social lists — the name sits ahead of its URL and
+   should read as the primary text of the row. */
+.entry-label {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
 
 /* --------------------------------------------------------------------------
    Login

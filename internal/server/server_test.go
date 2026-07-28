@@ -254,3 +254,52 @@ func TestDecodeJSONCapsBody(t *testing.T) {
 		t.Error("decodeJSON: expected error for >10MB body, got nil")
 	}
 }
+
+// The author reading their own site should not move the view counter. The
+// beacon is a same-origin sendBeacon, so a logged-in admin's session cookie
+// rides along with it and can be recognised here.
+func TestViewBeaconIgnoresLoggedInAdmin(t *testing.T) {
+	d := newTestDeps(t)
+
+	track := func(t *testing.T, withSession bool) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/track", strings.NewReader(`{"path":"/posts/hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		if withSession {
+			sess := httptest.NewRecorder()
+			if err := d.deps.Auth.SetSession(sess, "admin"); err != nil {
+				t.Fatal(err)
+			}
+			req.AddCookie(sess.Result().Cookies()[0])
+		}
+		rec := httptest.NewRecorder()
+		d.mux.ServeHTTP(rec, req)
+		// Always 204: the beacon must not tell a caller whether it counted.
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	}
+
+	views := func(t *testing.T) int64 {
+		t.Helper()
+		stats, err := d.deps.Store.Stats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stats.Total
+	}
+
+	before := views(t)
+	track(t, true)
+	if got := views(t); got != before {
+		t.Errorf("views went %d -> %d after an admin beacon; the admin's own reads must not count", before, got)
+	}
+
+	// A logged-out visitor on the same path still counts, so the check is
+	// filtering on the session and not just failing to record anything.
+	track(t, false)
+	if got := views(t); got != before+1 {
+		t.Errorf("views = %d after an anonymous beacon, want %d", got, before+1)
+	}
+}
