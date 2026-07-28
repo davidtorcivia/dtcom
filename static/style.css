@@ -610,6 +610,87 @@ mark, .highlight {
 }
 
 /* ==========================================================================
+   FOOTNOTES
+   ==========================================================================
+   goldmark emits a <sup> reference in the prose and a .footnotes block at the
+   end holding an <ol> and a back-link per note. */
+
+/* The marker should read as a reference, not as body text: small, raised, and
+   in the accent so it is findable without shouting. */
+.article-prose-body sup[id^="fnref"] {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 0;
+  vertical-align: super;
+  margin-left: 0.1em;
+}
+
+.article-prose-body sup[id^="fnref"] a {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0 0.15em;
+}
+
+.article-prose-body sup[id^="fnref"] a:hover {
+  background-color: var(--accent-yellow);
+  color: #111111 !important;
+}
+
+.article-prose-body .footnotes {
+  margin-top: 3.5rem;
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+}
+
+/* The global reset sets `border: none !important`, so the rule that separates
+   the notes from the article has to re-declare its own with the same weight. */
+.article-prose-body .footnotes hr {
+  border: none !important;
+  border-top: 2px solid var(--text) !important;
+  width: 88px;
+  margin: 0 0 1.5rem 0;
+  height: 0;
+}
+
+.article-prose-body .footnotes ol {
+  margin: 0 0 0 1.25rem;
+  padding: 0;
+}
+
+.article-prose-body .footnotes li {
+  margin-bottom: 0.85rem;
+  line-height: 1.6;
+}
+
+/* A note is one or more paragraphs; without this each carries the article's
+   1.75rem paragraph gap and the list sprawls. */
+.article-prose-body .footnotes li p {
+  margin-bottom: 0.4rem;
+}
+
+.article-prose-body .footnotes li p:last-child {
+  margin-bottom: 0;
+}
+
+/* The target of a jump gets a moment of highlight so the eye lands on the
+   right note rather than somewhere in the list. */
+.article-prose-body .footnotes li:target {
+  background-color: var(--surface-hover);
+}
+
+.article-prose-body .footnote-backref {
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-left: 0.25em;
+}
+
+.article-prose-body .footnote-backref:hover {
+  color: var(--accent);
+  background: none !important;
+}
+
+/* ==========================================================================
    CODE BLOCKS + MATH
    ========================================================================== */
 

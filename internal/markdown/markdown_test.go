@@ -238,6 +238,93 @@ func TestUnclosedDisplayMathDoesNotEatTheDocument(t *testing.T) {
 	}
 }
 
+// Footnotes are not part of goldmark's GFM bundle — that is tables,
+// strikethrough, linkify and task lists. They needed enabling separately, and
+// until they were, [^1] markers and their definitions rendered as literal text
+// in the middle of the prose.
+func TestFootnotesRender(t *testing.T) {
+	out, err := Render("Claim.[^1] More prose.\n\n[^1]: The source.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`class="footnote-ref"`,     // the marker in the prose
+		`id="fn:1"`,                // the note itself
+		`class="footnote-backref"`, // the link back up
+		"The source.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("footnote output missing %q:\n%s", want, out)
+		}
+	}
+	// The literal syntax must be gone, not merely accompanied by markup.
+	if strings.Contains(stripTags(out), "[^1]") {
+		t.Errorf("footnote syntax leaked as text:\n%s", out)
+	}
+}
+
+// A browser submits textarea content with CRLF line endings; files on disk use
+// LF. Both must render identically, or the admin preview shows something other
+// than what publishing produces.
+//
+// This is not hypothetical. One-line display math is repaired by a
+// line-oriented pass that matches "$$" at end of line, and a trailing carriage
+// return defeated that match — so under CRLF the repair silently did not fire
+// and the unrepaired formula swallowed the rest of the document. A real post
+// went from 65 paragraphs to 15.
+func TestCRLFRendersIdenticallyToLF(t *testing.T) {
+	lf := strings.Join([]string{
+		"Intro paragraph.",
+		"",
+		`$$L = V^\gamma$$`,
+		"",
+		"Body after the formula.[^1]",
+		"",
+		"```go",
+		"func main() {}",
+		"```",
+		"",
+		"Closing paragraph.",
+		"",
+		"[^1]: A note.",
+		"",
+	}, "\n")
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+
+	outLF, err := Render(lf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outCRLF, err := Render(crlf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outLF != outCRLF {
+		t.Errorf("CRLF and LF rendered differently\n--- LF ---\n%s\n--- CRLF ---\n%s", outLF, outCRLF)
+	}
+	if n := strings.Count(outCRLF, `class="math display"`); n != 1 {
+		t.Errorf("expected one display formula under CRLF, got %d:\n%s", n, outCRLF)
+	}
+	if !strings.Contains(stripTags(outCRLF), "Closing paragraph.") {
+		t.Errorf("content after the formula was swallowed:\n%s", outCRLF)
+	}
+}
+
+// A lone carriage return is rare, but must not reintroduce the same class of
+// bug through a different door.
+func TestLoneCarriageReturnIsNormalised(t *testing.T) {
+	out, err := Render("One.\rTwo.\r\r$$x = 1$$\rEnd.\r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `class="math display"`) {
+		t.Errorf("display math lost with lone CR line endings:\n%s", out)
+	}
+	if !strings.Contains(stripTags(out), "End.") {
+		t.Errorf("trailing content lost:\n%s", out)
+	}
+}
+
 // The multi-line form was already correct and must stay that way.
 func TestMultiLineDisplayMathUnchanged(t *testing.T) {
 	src := "$$\n" + `L = \begin{cases}` + "\n" + `a \\` + "\nb\n" + `\end{cases}` + "\n$$\n"
