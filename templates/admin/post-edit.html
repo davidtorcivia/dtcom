@@ -1,0 +1,32 @@
+{{define "post-edit"}}{{$a := .Article}}
+{{template "admin-header" .}}
+<main style="margin-top:2rem">
+<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1.5rem">{{if $a}}Edit{{else}}New{{end}} Post</h2>
+<form method="post" action="/admin/posts/save" style="display:flex;flex-direction:column;gap:0.75rem">
+<input name="slug" type="hidden" value="{{if $a}}{{$a.Slug}}{{end}}">
+<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Title</label>
+<input name="title" value="{{if $a}}{{$a.Title}}{{end}}" style="padding:0.5rem;font-family:var(--font-sans);font-size:1.1rem">
+<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Date</label>
+<input name="date" type="date" value="{{if $a}}{{formatDate $a.Date}}{{end}}" style="padding:0.5rem;font-family:var(--font-mono)">
+<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Description</label>
+<input name="description" value="{{if $a}}{{$a.Description}}{{end}}" style="padding:0.5rem;font-family:var(--font-sans)">
+<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Tags (comma-separated)</label>
+<input name="tags" value="{{if $a}}{{join $a.Tags ", "}}{{end}}" style="padding:0.5rem;font-family:var(--font-mono)">
+<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase;display:flex;align-items:center;gap:0.4rem"><input type="checkbox" name="draft" {{if $a.Draft}}checked{{end}}> Draft</label>
+<div class="editor">
+<div class="editor-toolbar" style="display:flex;gap:0.5rem;margin-bottom:0.5rem">
+<button type="button" data-mode="write" class="active" style="font-family:var(--font-mono);padding:0.25rem 0.75rem;cursor:pointer">Write</button>
+<button type="button" data-mode="preview" style="font-family:var(--font-mono);padding:0.25rem 0.75rem;cursor:pointer">Preview</button>
+</div>
+<textarea name="body" class="editor-write" style="width:100%;min-height:400px;padding:0.75rem;font-family:var(--font-mono);font-size:0.95rem;line-height:1.6">{{if $a}}{{$a.Body}}{{end}}</textarea>
+<div class="editor-preview article-prose-body" hidden></div>
+</div>
+<div style="display:flex;gap:1rem;margin-top:1rem">
+<button type="submit" style="padding:0.5rem 1.5rem;background:var(--accent-yellow);border:none;font-family:var(--font-sans);font-weight:700;cursor:pointer">Save</button>
+<a href="/admin/posts" style="padding:0.5rem 1rem">Cancel</a>
+</div>
+</form>
+<script src="/static/editor.js" defer></script>
+</main>
+{{template "admin-footer"}}
+{{end}}

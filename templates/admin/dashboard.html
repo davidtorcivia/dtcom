@@ -1,0 +1,25 @@
+{{define "dashboard"}}{{$s := .Stats}}
+{{template "admin-header" .}}
+<main style="margin-top:2rem">
+<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1rem">Dashboard</h2>
+<p style="font-family:var(--font-mono);font-size:1.5rem">Total views: <strong>{{$s.Total}}</strong></p>
+<div style="display:flex;gap:2rem;align-items:flex-start;flex-wrap:wrap;margin-top:1.5rem">
+<div style="flex:1;min-width:280px">
+<h3 style="text-transform:uppercase;font-family:var(--font-sans)">By article</h3>
+<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
+{{range $s.ByPath}}<li style="display:flex;justify-content:space-between;gap:1rem;padding:0.25rem 0;border-bottom:1px dashed var(--text-muted)"><span>{{.Path}}</span><strong>{{.Count}}</strong></li>{{end}}
+</ul>
+</div>
+<div style="flex:1;min-width:280px">
+<h3 style="text-transform:uppercase;font-family:var(--font-sans)">By day (30d)</h3>
+<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
+{{range $s.ByDay}}<li style="display:flex;justify-content:space-between;gap:1rem;padding:0.25rem 0;border-bottom:1px dashed var(--text-muted)"><span>{{.Day}}</span><strong>{{.Count}}</strong></li>{{end}}
+</ul>
+</div>
+</div>
+<form method="post" action="/admin/regenerate" style="margin-top:2rem">
+<button type="submit" style="padding:0.5rem 1.5rem;background:var(--accent-yellow);border:none;font-family:var(--font-sans);font-weight:700;cursor:pointer">Regenerate site</button>
+</form>
+</main>
+{{template "admin-footer"}}
+{{end}}
