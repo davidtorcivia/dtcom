@@ -7,6 +7,18 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="Links — {{.Site.Title}}">
   <meta property="og:url" content="{{absURL .Site "/links"}}">
+  <meta property="og:description" content="Links from {{.Site.Title}}">
+  <meta property="og:image" content="{{.OGImage}}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{.Site.Title}}">
+  <meta property="og:site_name" content="{{.Site.Title}}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{{.OGImage}}">
+  <meta name="twitter:title" content="Links — {{.Site.Title}}">
+  <meta name="twitter:description" content="Links from {{.Site.Title}}">{{with twitterHandle .Site}}
+  <meta name="twitter:creator" content="{{.}}">
+  <meta name="twitter:site" content="{{.}}">{{end}}
   {{template "head-common" .}}
 </head>
 <body data-track-path="/links">

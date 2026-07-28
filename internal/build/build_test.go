@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -125,10 +126,27 @@ func TestRebuildWritesPublic(t *testing.T) {
 			t.Errorf("article HTML missing %q:\n%s", want, artHTML)
 		}
 	}
-	// A post with no cover must not claim an og:image — the old default
-	// pointed at a file that was never shipped.
-	if strings.Contains(artHTML, `property="og:image"`) {
-		t.Errorf("article advertises og:image with no cover set:\n%s", artHTML)
+	// A post with no cover now gets a card generated for it, so it does
+	// advertise an og:image. The rule that matters is unchanged and is what
+	// this checks: whatever is advertised has to be a file that exists.
+	// The old default named /static/images/og-default.jpg, which was never
+	// shipped, and every post pointed unfurlers at a 404.
+	m := regexp.MustCompile(`property="og:image" content="([^"]+)"`).FindStringSubmatch(artHTML)
+	if m == nil {
+		t.Fatalf("article advertises no og:image:\n%s", artHTML)
+	}
+	ogURL := m[1]
+	rel, ok := strings.CutPrefix(ogURL, "https://example.com/")
+	if !ok {
+		t.Fatalf("og:image is not an absolute URL on the site: %q", ogURL)
+	}
+	if _, err := os.Stat(filepath.Join(te.publicDir, filepath.FromSlash(rel))); err != nil {
+		t.Errorf("og:image %q does not exist on disk: %v", ogURL, err)
+	}
+	// The card is what makes summary_large_image honest; without an image
+	// that tag renders as a blank rectangle in every client.
+	if !strings.Contains(artHTML, `name="twitter:card" content="summary_large_image"`) {
+		t.Errorf("article is missing the large twitter card:\n%s", artHTML)
 	}
 	// No inline <script> anywhere, so the CSP can forbid them.
 	if strings.Contains(artHTML, "<script>") {

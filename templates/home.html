@@ -8,6 +8,18 @@
   <meta property="og:title" content="{{.Site.Title}}">
   <meta property="og:description" content="{{.Site.Description}}">
   <meta property="og:url" content="{{absURL .Site "/"}}">
+  <meta property="og:image" content="{{.OGImage}}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{.Site.Title}}">
+  <meta property="og:site_name" content="{{.Site.Title}}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{{.OGImage}}">
+  <meta name="twitter:title" content="{{.Site.Title}}">
+  <meta name="twitter:description" content="{{.Site.Description}}">{{with twitterHandle .Site}}
+  <meta name="twitter:creator" content="{{.}}">
+  <meta name="twitter:site" content="{{.}}">{{end}}
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"{{.Site.Title}}","description":"{{.Site.Description}}","url":"{{absURL .Site "/"}}","author":{"@type":"Person","name":"{{.Site.Author}}"}}</script>
   {{template "head-common" .}}
 </head>
 <body>
