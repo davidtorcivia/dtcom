@@ -325,7 +325,14 @@ func (d *Deps) apiAddLink(w http.ResponseWriter, r *http.Request) {
 		Source: "manual", SortDate: sd,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		// AddLink returns an error for a disallowed href scheme (javascript:,
+		// data:, etc.) — a client-supplied input problem, so 400. Anything
+		// else is treated as a 500.
+		if strings.Contains(err.Error(), "disallowed scheme") {
+			writeError(w, http.StatusBadRequest, err)
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	if err := d.Engine.Rebuild(); err != nil {
