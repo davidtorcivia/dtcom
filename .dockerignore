@@ -1,4 +1,8 @@
 .git
+# Never bake the author's content into the image. It is gitignored, so a clean
+# checkout has none — but a local build would otherwise pick up whatever
+# happens to be sitting in the working tree.
+content/
 public/
 data/
 .env

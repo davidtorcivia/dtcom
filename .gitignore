@@ -1,3 +1,14 @@
+# The author's content, not the project's source.
+#
+# Posts and site.yml are data. They are written by hand, by /admin, by the REST
+# API, and by MCP tools — the admin and API paths rewrite site.yml through a
+# YAML round trip, so tracking it here would mean every edit made on a running
+# site shows up as a diff and every deploy risks a conflict against it.
+#
+# This is not backed up by being in the repo. Back up content/ and data/
+# together; see docs/deploy-erebus.md.
+/content/
+
 # Generated
 /public/
 /data/

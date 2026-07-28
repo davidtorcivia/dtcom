@@ -63,7 +63,9 @@ func run() error {
 	// site config — held in an atomic pointer so site-config writes (via
 	// admin/API/MCP) can swap in a new pointer without restarting the engine
 	// and without racing the engine's reads during Rebuild.
-	site, err := siteconfig.Load(cfg.SiteYAMLPath)
+	// LoadOrSeed, not Load: content/ is the author's data and is not tracked
+	// in git, so a fresh deployment legitimately has no site.yml yet.
+	site, err := siteconfig.LoadOrSeed(cfg.SiteYAMLPath)
 	if err != nil {
 		return err
 	}
