@@ -587,23 +587,34 @@ footer.site-footer {
     padding: 1.75rem 1rem;
   }
 
+  /* The header wraps rather than compressing: the site title and the nav
+     labels are both plain text with no shorter form to fall back to, so on a
+     narrow screen the nav drops to its own line instead of colliding with the
+     title or forcing the page to scroll sideways. */
   header.site-header {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
   }
 
+  .brand-title {
+    font-size: 0.875rem;
+    letter-spacing: 0.08em;
+  }
+
+  /* No display:none on .nav-text-label here.
+     It used to be hidden on the assumption that a .nav-icon-label would take
+     its place — but no template has ever rendered one, so the labels were the
+     entire content of those links. Hiding them left Search and Links as
+     zero-width, invisible, unhittable anchors on every phone. Nav entries are
+     author-defined free text now, so there is no icon vocabulary to swap in;
+     the text is the control. */
   .nav-right {
     gap: 0.75rem;
     font-size: 0.75rem;
-  }
-
-  .nav-text-label {
-    display: none;
-  }
-
-  .nav-icon-label {
-    display: inline-block;
+    flex-wrap: wrap;
   }
 
   .article-title-text {
@@ -703,11 +714,8 @@ footer.site-footer {
   }
 }
 
-@media (min-width: 641px) {
-  .nav-icon-label {
-    display: none;
-  }
-}
+/* The companion rule that hid .nav-icon-label above 640px is gone with it.
+   Nothing in any template has ever rendered that element. */
 
 /* ==========================================================================
    ACCESSIBILITY + PAGE STATES
