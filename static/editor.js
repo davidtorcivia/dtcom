@@ -93,6 +93,25 @@
       }
     }
 
+    // insertImageMarkdown drops ![](url) in and leaves the caret between the
+    // brackets, because that empty alt slot is where the caption goes: an image
+    // alone in its paragraph renders as a <figure> with its alt text as the
+    // visible <figcaption>. Landing the caret after the markdown instead — as
+    // this used to — meant every uploaded image shipped without one unless the
+    // author went back and clicked between two square brackets.
+    function insertImageMarkdown(markdown) {
+      var start = ta.selectionStart || 0;
+      insertAtCursor(markdown);
+      var open = markdown.indexOf('![');
+      if (open < 0) {
+        return;
+      }
+      var caret = start + open + 2; // just past the "!["
+      if (caret <= ta.value.length) {
+        ta.selectionStart = ta.selectionEnd = caret;
+      }
+    }
+
     function upload(file) {
       if (!file || !/^image\//.test(file.type)) {
         return;
@@ -110,8 +129,8 @@
           });
         })
         .then(function (body) {
-          insertAtCursor(body.markdown || '![](' + body.url + ')');
-          setStatus('Inserted ' + body.url);
+          insertImageMarkdown(body.markdown || '![](' + body.url + ')');
+          setStatus('Inserted ' + body.url + ' — type a caption');
         })
         .catch(function (err) {
           setStatus('Upload failed: ' + err.message, true);
