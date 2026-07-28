@@ -20,9 +20,17 @@ import (
 // Deps bundles every collaborator the handlers need. The Site field is a
 // function (not a pointer) so handlers always see the latest config after a
 // site.yml rewrite.
+//
+// ReloadSite re-reads site.yml from disk and atomically swaps the pointer
+// that Site() returns. Handlers that mutate site.yml (admin save, REST
+// site-section PUT, MCP update_* tools) must NOT edit the live *Config in
+// place — that would race the engine's concurrent reads during Rebuild.
+// Instead they write a fresh copy to disk and call ReloadSite before
+// rebuilding, so every reader observes a single consistent pointer.
 type Deps struct {
 	Cfg        *config.Config
 	Site       func() *siteconfig.Config
+	ReloadSite func() error
 	Store      *store.Store
 	Engine     *build.Engine
 	Poller     *feeds.Poller
