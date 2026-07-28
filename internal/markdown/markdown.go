@@ -22,6 +22,10 @@ import (
 var md = goldmark.New(
 	goldmark.WithExtensions(
 		extension.GFM,
+		// Footnotes are NOT part of GFM in goldmark — that bundle is tables,
+		// strikethrough, linkify and task lists only. Without this, [^1] markers
+		// and their definitions rendered as literal text.
+		extension.Footnote,
 		// Code blocks are highlighted here, at build time, rather than by a
 		// script in the browser: the output is a static site, so there is no
 		// reason to ship a highlighter and re-run it on every visit.
@@ -67,6 +71,17 @@ func HasMath(renderedHTML string) bool {
 
 // Render converts markdown source to an HTML fragment.
 func Render(src string) (string, error) {
+	// Line endings are normalised here rather than at the call sites. A browser
+	// submits textarea content with CRLF, files on disk use LF, and the save
+	// path already converted — but the admin preview did not, so it rendered
+	// something subtly different from what publishing produced. Worse, the
+	// line-oriented normalisation below matches on "$$" at end of line, which a
+	// trailing \r silently defeats: one-line display math then slipped through
+	// unfixed and swallowed the rest of the document. Doing it inside Render
+	// means no future caller can forget.
+	src = strings.ReplaceAll(src, "\r\n", "\n")
+	src = strings.ReplaceAll(src, "\r", "\n")
+
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(normalizeDisplayMath(src)), &buf); err != nil {
 		return "", err
