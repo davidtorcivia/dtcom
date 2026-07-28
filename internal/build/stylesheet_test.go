@@ -45,3 +45,38 @@ func TestNavLabelIsNeverHidden(t *testing.T) {
 		t.Error("style.css references .nav-icon-label, but no template renders that element")
 	}
 }
+
+// The reset sets `border: none !important` on every element, so anything whose
+// only visual substance is a border has to re-declare one at the same weight or
+// it renders as nothing at all.
+//
+// A `---` in a post becomes an <hr>. There was no hr rule for a long time, and
+// every section divider in every post was silently invisible — the markup was
+// in the page, the element had no height and no border, and nobody could see it.
+func TestBorderOnlyElementsAreStyled(t *testing.T) {
+	path := filepath.Join("..", "..", "static", "style.css")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := regexp.MustCompile(`(?s)/\*.*?\*/`).ReplaceAllString(string(raw), "")
+
+	for _, sel := range []string{
+		`.article-prose-body hr`,
+		`.article-prose-body .footnotes hr`,
+	} {
+		rule := regexp.MustCompile(`(?s)` + regexp.QuoteMeta(sel) + `\s*\{[^}]*\}`).FindString(css)
+		if rule == "" {
+			t.Errorf("no rule for %q — the reset leaves it invisible", sel)
+			continue
+		}
+		// `border: none` alone is not enough; something has to draw the line.
+		if !strings.Contains(rule, "border-top") {
+			t.Errorf("%q declares no border-top, so it renders as nothing:\n%s", sel, rule)
+		}
+		// Without !important the reset's own !important wins.
+		if !strings.Contains(rule, "!important") {
+			t.Errorf("%q needs !important to beat the reset's border:none:\n%s", sel, rule)
+		}
+	}
+}
