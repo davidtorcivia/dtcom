@@ -1,0 +1,25 @@
+services:
+  dtcom:
+    build: .
+    image: dtcom:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DTCOM_BASE_URL: ${DTCOM_BASE_URL}
+      DTCOM_ADMIN_PASSWORD_HASH: ${DTCOM_ADMIN_PASSWORD_HASH}
+      DTCOM_TOTP_SECRET: ${DTCOM_TOTP_SECRET}
+      DTCOM_SESSION_KEY: ${DTCOM_SESSION_KEY}
+      DTCOM_API_TOKEN: ${DTCOM_API_TOKEN}
+      DTCOM_RSS_INTERVAL: ${DTCOM_RSS_INTERVAL:-30m}
+      DTCOM_LISTEN_ADDR: ":8080"
+    volumes:
+      # content + templates + static are mounted for live editing;
+      # the file watcher inside the container picks up changes and rebuilds
+      - ./content:/content
+      - ./static:/static
+      - ./templates:/templates
+      # data (SQLite db + uploaded images) is a named volume, persisted across rebuilds
+      - dtcom-data:/data
+volumes:
+  dtcom-data:
