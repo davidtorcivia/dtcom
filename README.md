@@ -173,6 +173,7 @@ A fresh clone therefore has no content at all. The binary seeds a default `site.
 go test ./...                          # all packages
 go vet ./...
 gofmt -w .
+node scripts/editor-shortcuts.test.mjs # editor keyboard shortcuts (needs node)
 DTCOM_BASE_URL=http://localhost:8080 \
 DTCOM_ADMIN_PASSWORD_HASH='$2a$10$...' \
 DTCOM_TOTP_SECRET=<base32> \
