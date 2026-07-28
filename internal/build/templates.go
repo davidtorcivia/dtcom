@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -136,4 +137,25 @@ func socialIconSVG(name string) template.HTML {
 		return template.HTML(svg)
 	}
 	return template.HTML("")
+}
+
+// SocialIconNames lists the icons a social link can use, sorted.
+//
+// The admin editor offers these as a dropdown rather than a free-text field:
+// an unrecognised name renders as nothing at all, which looks like a bug
+// rather than a typo. Sorted so the list does not reshuffle between builds —
+// map iteration order would otherwise move the options around on every render.
+func SocialIconNames() []string {
+	out := make([]string, 0, len(socialIcons))
+	for name := range socialIcons {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// HasSocialIcon reports whether name is a known icon.
+func HasSocialIcon(name string) bool {
+	_, ok := socialIcons[name]
+	return ok
 }

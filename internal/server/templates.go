@@ -27,14 +27,17 @@ func newAdminTemplates(dir string, fp *assets.Fingerprinter) (*adminTemplateStor
 }
 
 // adminTemplateFuncs are the helpers available to admin templates. Kept
-// minimal: join (for tag lists), formatDate (for the date input value), and
-// asset (content-hashed /static URLs, same as the public templates).
+// minimal: join (for tag lists), formatDate (for the date input value), asset
+// (content-hashed /static URLs, same as the public templates), and add — which
+// exists because Go templates have no arithmetic, and the nav/social reorder
+// buttons need to know whether a row is the last one.
 func adminTemplateFuncs(fp *assets.Fingerprinter) template.FuncMap {
 	return template.FuncMap{
 		"asset":          fp.URL,
 		"join":           func(ss []string, sep string) string { return strings.Join(ss, sep) },
 		"formatDate":     func(t time.Time) string { return t.Format("2006-01-02") },
 		"formatDateUnix": func(u int64) string { return time.Unix(u, 0).UTC().Format("2006-01-02") },
+		"add":            func(a, b int) int { return a + b },
 	}
 }
 

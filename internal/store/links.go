@@ -30,9 +30,13 @@ type Link struct {
 	CreatedAt int64
 }
 
-// sanitizeHref returns the href unchanged if it has a safe scheme (http, https,
+// SanitizeHref returns the href unchanged if it has a safe scheme (http, https,
 // mailto) or is relative (starts with / or #). Otherwise it returns "" which
 // the caller treats as "drop this link".
+//
+// It is exported because the admin nav and social-link editors need the same
+// guarantee for hrefs an operator types in, and a second copy of an allowlist
+// is a second place for it to rot.
 //
 // This blocks javascript:, data:, vbscript:, and other dangerous schemes from
 // ever being stored or rendered as a clickable link — important because link
@@ -40,7 +44,7 @@ type Link struct {
 // malicious feed item like <link>javascript:alert(1)</link> would otherwise
 // round-trip into an <a href="javascript:..."> on /links. Go's html/template
 // escapes the attribute but does not block the scheme itself.
-func sanitizeHref(href string) string {
+func SanitizeHref(href string) string {
 	h := strings.TrimSpace(href)
 	if h == "" {
 		return ""
@@ -70,7 +74,7 @@ func (s *Store) AddLink(l Link) (int64, error) {
 	if l.CreatedAt == 0 {
 		l.CreatedAt = time.Now().Unix()
 	}
-	href := sanitizeHref(l.Href)
+	href := SanitizeHref(l.Href)
 	if href == "" {
 		return 0, ErrDisallowedScheme
 	}
@@ -102,7 +106,7 @@ func (s *Store) AddLink(l Link) (int64, error) {
 func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 	l.Source = "rss"
 	l.CreatedAt = time.Now().Unix()
-	href := sanitizeHref(l.Href)
+	href := SanitizeHref(l.Href)
 	if href == "" {
 		// skip silently — RSS items with javascript:/data: hrefs are treated
 		// as already-present (dedup) so they don't appear on /links.

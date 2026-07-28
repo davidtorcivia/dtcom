@@ -140,6 +140,17 @@ func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 	// "dropped" from "recorded" to a caller that might be probing.
 	defer w.WriteHeader(http.StatusNoContent)
 
+	// The author reading their own site is not a view worth counting, and it
+	// is the single most frequent way these numbers get inflated — every
+	// proofread after a publish used to register as a hit.
+	//
+	// This works because the beacon is a same-origin sendBeacon, which carries
+	// cookies, so an admin session is visible here. It is checked before the
+	// rate limiter so that browsing the site while logged in cannot use up the
+	// budget that real visitors from the same address share.
+	if _, ok := d.Auth.SessionUser(r); ok {
+		return
+	}
 	if !d.limits.track.Allow(d.clientIP(r)) {
 		return
 	}

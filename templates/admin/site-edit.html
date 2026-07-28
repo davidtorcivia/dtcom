@@ -33,11 +33,67 @@
 <option value="full"{{if $s.ShowLinkNotes}} selected{{end}}>Full — title with its summary line</option>
 <option value="minimal"{{if not $s.ShowLinkNotes}} selected{{end}}>Minimal — date :: title only</option>
 </select>
-<p class="admin-hint">Nav, social links, and RSS feeds are managed on the <a href="/admin/links">Links</a> page, via the REST API, or by editing content/site.yml directly.</p>
+<p class="admin-hint">RSS feeds are managed on the <a href="/admin/links">Links</a> page. Nav and social links are below.</p>
 <div class="admin-actions">
 <button type="submit" class="admin-btn">Save</button>
 </div>
 </form>
+
+{{/* Nav and social are edited as lists rather than as fields on the form
+     above: each row is its own tiny form so a remove or reorder is one
+     request, and no amount of fiddling can submit a half-built entry. */}}
+<section class="admin-section">
+<h3 class="admin-h3">Nav links</h3>
+<p class="admin-hint">Shown in the site header, in this order.</p>
+<ul class="admin-list">
+{{range $i, $n := $s.Nav}}<li>
+<span class="link-main">
+<span class="entry-label">{{$n.Label}}</span>
+<a class="feed-url" href="{{$n.Href}}">{{$n.Href}}</a>
+</span>
+<span class="feed-actions">
+{{if $i}}<form method="post" action="/admin/site/nav/{{$i}}/move"><input type="hidden" name="dir" value="up"><button type="submit" class="admin-link-btn" aria-label="Move {{$n.Label}} up">↑</button></form>{{end}}
+{{if lt (add $i 1) (len $s.Nav)}}<form method="post" action="/admin/site/nav/{{$i}}/move"><input type="hidden" name="dir" value="down"><button type="submit" class="admin-link-btn" aria-label="Move {{$n.Label}} down">↓</button></form>{{end}}
+<form method="post" action="/admin/site/nav/{{$i}}/remove" data-confirm="Remove this nav link?" data-confirm-detail="{{$n.Label}} will no longer appear in the site header." data-confirm-action="Remove"><button type="submit" class="admin-link-btn">remove</button></form>
+</span>
+</li>{{else}}<li class="admin-empty">No nav links. The header will show only the site title.</li>{{end}}
+</ul>
+<form method="post" action="/admin/site/nav/add" class="admin-add-form">
+<label class="admin-sr-only" for="n-label">Label</label>
+<input id="n-label" name="label" placeholder="Label" required>
+<label class="admin-sr-only" for="n-href">URL or path</label>
+<input id="n-href" name="href" placeholder="/about or https://…" required>
+<button type="submit">Add</button>
+</form>
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">Social links</h3>
+<p class="admin-hint">Shown as icons under the bio. Only the icons listed are available — an unknown one would render as an invisible gap.</p>
+<ul class="admin-list">
+{{range $i, $soc := $s.Social}}<li>
+<span class="link-main">
+<span class="entry-label">{{$soc.Label}}</span>
+<em class="admin-source-flag">{{$soc.Icon}}</em>
+<a class="feed-url" href="{{$soc.Href}}">{{$soc.Href}}</a>
+</span>
+<span class="feed-actions">
+{{if $i}}<form method="post" action="/admin/site/social/{{$i}}/move"><input type="hidden" name="dir" value="up"><button type="submit" class="admin-link-btn" aria-label="Move {{$soc.Label}} up">↑</button></form>{{end}}
+{{if lt (add $i 1) (len $s.Social)}}<form method="post" action="/admin/site/social/{{$i}}/move"><input type="hidden" name="dir" value="down"><button type="submit" class="admin-link-btn" aria-label="Move {{$soc.Label}} down">↓</button></form>{{end}}
+<form method="post" action="/admin/site/social/{{$i}}/remove" data-confirm="Remove this social link?" data-confirm-detail="{{$soc.Label}} will no longer appear under the bio." data-confirm-action="Remove"><button type="submit" class="admin-link-btn">remove</button></form>
+</span>
+</li>{{else}}<li class="admin-empty">No social links.</li>{{end}}
+</ul>
+<form method="post" action="/admin/site/social/add" class="admin-add-form">
+<label class="admin-sr-only" for="soc-label">Label</label>
+<input id="soc-label" name="label" placeholder="Label" required>
+<label class="admin-sr-only" for="soc-href">URL</label>
+<input id="soc-href" name="href" placeholder="https://… or mailto:…" required>
+<label class="admin-sr-only" for="soc-icon">Icon</label>
+<select id="soc-icon" name="icon">{{range $.Icons}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+<button type="submit">Add</button>
+</form>
+</section>
 </main>
 {{template "admin-footer"}}
 {{end}}
