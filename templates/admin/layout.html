@@ -1,0 +1,30 @@
+{{/* layout.html defines the admin chrome (header, nav, footer) as partials.
+     Every admin page template includes admin-header/admin-footer and passes a
+     data map carrying a "Title" string. */}}
+{{define "admin-header"}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — Admin</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+<div class="site-container">
+<header class="site-header">
+<div class="brand-title"><a href="/admin">dtcom admin</a></div>
+<nav class="nav-right">
+<a href="/admin">Dashboard</a>
+<a href="/admin/posts">Posts</a>
+<a href="/admin/links">Links</a>
+<a href="/admin/site">Site</a>
+<form method="post" action="/admin/logout" style="display:inline"><button type="submit" class="nav-link-btn" style="background:none;border:none;color:inherit;font-family:var(--font-mono);cursor:pointer;padding:0.2rem 0.4rem">Logout</button></form>
+</nav>
+</header>
+{{end}}
+
+{{define "admin-footer"}}
+</div>
+</body>
+</html>{{end}}

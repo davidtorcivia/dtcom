@@ -1,0 +1,29 @@
+{{define "home"}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Site.Title}}</title>
+  <meta name="description" content="{{.Site.Description}}">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="alternate" type="application/rss+xml" title="{{.Site.Title}}" href="/feed.xml">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="site-container">
+  {{template "site-header" .}}
+  {{template "bio-section" .}}
+  <main class="article-index-list">
+    {{range .Articles}}<div class="index-row">
+      <a href="/posts/{{.Slug}}">
+        <span class="index-date">{{formatDate .Date}}</span>
+        <span class="index-symbol-cell"><span class="index-symbol">::</span></span>
+        <span class="index-title">{{.Title}}</span>
+      </a>
+    </div>{{end}}
+  </main>
+  {{template "site-footer" .}}
+</div>
+</body>
+</html>{{end}}
