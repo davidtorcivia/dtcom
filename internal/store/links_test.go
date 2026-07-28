@@ -34,11 +34,25 @@ func TestUpsertRSSLinkDedups(t *testing.T) {
 	defer s.Close()
 
 	l := Link{Label: "Post", Href: "https://sub.com/p/1", Source: "rss", FeedURL: "https://sub.com/feed", SortDate: 2000}
-	if _, err := s.UpsertRSSLink(l); err != nil {
+	id1, inserted, err := s.UpsertRSSLink(l)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertRSSLink(l); err != nil {
+	if !inserted {
+		t.Fatal("first upsert: want inserted=true")
+	}
+	if id1 <= 0 {
+		t.Fatalf("first upsert: want positive id, got %d", id1)
+	}
+	id2, inserted2, err := s.UpsertRSSLink(l)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if inserted2 {
+		t.Fatal("second upsert: want inserted=false (dedup)")
+	}
+	if id2 != id1 {
+		t.Fatalf("second upsert returned id %d, want same as first %d", id2, id1)
 	}
 	links, _ := s.ListLinks(100)
 	if len(links) != 1 {

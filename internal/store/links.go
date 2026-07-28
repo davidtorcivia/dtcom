@@ -35,8 +35,10 @@ func (s *Store) AddLink(l Link) (int64, error) {
 	return res.LastInsertId()
 }
 
-// UpsertRSSLink inserts an RSS link if its href isn't already present.
-func (s *Store) UpsertRSSLink(l Link) (int64, error) {
+// UpsertRSSLink inserts an RSS link if its href isn't already present and
+// returns (id, inserted, err). When inserted is false the href was already
+// present (dedup); id is then the existing row's id.
+func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 	l.Source = "rss"
 	l.CreatedAt = time.Now().Unix()
 	res, err := s.db.Exec(
@@ -46,15 +48,16 @@ func (s *Store) UpsertRSSLink(l Link) (int64, error) {
 		l.Label, l.Href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("upsert rss link: %w", err)
+		return 0, false, fmt.Errorf("upsert rss link: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		var id int64
 		_ = s.db.QueryRow("SELECT id FROM links WHERE href=?", l.Href).Scan(&id)
-		return id, nil
+		return id, false, nil
 	}
-	return res.LastInsertId()
+	id, _ := res.LastInsertId()
+	return id, true, nil
 }
 
 func (s *Store) RemoveLink(id int64) error {
