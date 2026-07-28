@@ -1,35 +1,41 @@
 {{define "article"}}{{$a := .Article}}{{$site := .Site}}<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{$a.Title}} — {{$site.Title}}</title>
   <meta name="description" content="{{$a.Description}}">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="alternate" type="application/rss+xml" title="{{$site.Title}}" href="/feed.xml">
+  <link rel="canonical" href="{{.URL}}">
   <link rel="alternate" type="text/markdown" href="/posts/{{$a.Slug}}.md">
   <meta property="og:title" content="{{$a.Title}}">
   <meta property="og:description" content="{{$a.Description}}">
   <meta property="og:url" content="{{.URL}}">
   <meta property="og:type" content="article">
-  <meta property="og:image" content="{{ogImage $a $site}}">
-  <meta name="twitter:card" content="summary_large_image">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{$a.Title}}","datePublished":"{{formatDate $a.Date}}","author":{"@type":"Person","name":"{{$site.Author}}"},"url":"{{.URL}}"}</script>
-  <script src="/static/app.js" defer></script>
+  <meta property="og:site_name" content="{{$site.Title}}">
+  <meta property="article:published_time" content="{{rfc3339 $a.Date}}">
+  {{/* Only advertise an image when the post actually has a cover: pointing at
+       a file that doesn't exist gives every unfurler a broken preview. */}}
+  {{with ogImage $a $site}}<meta property="og:image" content="{{.}}">
+  <meta name="twitter:card" content="summary_large_image">{{else}}<meta name="twitter:card" content="summary">{{end}}
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","headline":"{{$a.Title}}","description":"{{$a.Description}}","datePublished":"{{rfc3339 $a.Date}}","author":{"@type":"Person","name":"{{$site.Author}}"},"url":"{{.URL}}"}</script>
+  {{template "head-common" .}}
 </head>
-<body>
+{{/* The view beacon's target is a data attribute rather than an inline
+     <script> assignment, so the page needs no inline script and the CSP can
+     forbid them outright. */}}
+<body data-track-path="/posts/{{$a.Slug}}">
+<a class="skip-link" href="#main">Skip to content</a>
 <div class="site-container">
   {{template "site-header" .}}
   <div class="article-header">
     <h1 class="article-title-text">{{$a.Title}}</h1>
-    <div class="article-meta-date">{{formatDate $a.Date}}</div>
+    <div class="article-meta-date">
+      <time datetime="{{rfc3339 $a.Date}}">{{formatDateLong $a.Date}}</time>
+      <span class="dot-sep">·</span> {{readingTime $a.Body}} min read
+    </div>
   </div>
-  <article class="article-prose-body">
+  <article class="article-prose-body" id="main">
     {{.HTML | htmlSafe}}
   </article>
   {{template "site-footer" .}}
 </div>
-<script>window.trackPath = '/posts/{{$a.Slug}}';</script>
 </body>
 </html>{{end}}

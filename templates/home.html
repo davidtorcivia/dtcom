@@ -1,27 +1,28 @@
 {{define "home"}}<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Site.Title}}</title>
   <meta name="description" content="{{.Site.Description}}">
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="alternate" type="application/rss+xml" title="{{.Site.Title}}" href="/feed.xml">
-  <script src="/static/app.js" defer></script>
+  <link rel="canonical" href="{{absURL .Site "/"}}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{.Site.Title}}">
+  <meta property="og:description" content="{{.Site.Description}}">
+  <meta property="og:url" content="{{absURL .Site "/"}}">
+  {{template "head-common" .}}
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <div class="site-container">
   {{template "site-header" .}}
   {{template "bio-section" .}}
-  <main class="article-index-list">
+  <main class="article-index-list" id="main">
     {{range .Articles}}<div class="index-row">
       <a href="/posts/{{.Slug}}">
-        <span class="index-date">{{formatDate .Date}}</span>
-        <span class="index-symbol-cell"><span class="index-symbol">::</span></span>
+        <span class="index-date"><time datetime="{{rfc3339 .Date}}">{{formatDate .Date}}</time></span>
+        <span class="index-symbol-cell"><span class="index-symbol" aria-hidden="true">::</span></span>
         <span class="index-title">{{.Title}}</span>
       </a>
-    </div>{{end}}
+    </div>{{else}}<p class="empty-state">No posts yet.</p>{{end}}
   </main>
   {{template "site-footer" .}}
 </div>

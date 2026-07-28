@@ -1,0 +1,17 @@
+# Normalize line endings.
+#
+# Without this, a Windows checkout rewrites tracked files to CRLF, which makes
+# `gofmt -l` flag every untouched Go file and — more to the point — would put
+# CRLF into the Linux container image. Everything here is text that wants LF.
+* text=auto eol=lf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.db binary
+*.woff binary
+*.woff2 binary

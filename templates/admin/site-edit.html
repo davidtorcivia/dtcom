@@ -1,18 +1,24 @@
 {{define "site-edit"}}{{$s := .Site}}
 {{template "admin-header" .}}
-<main style="margin-top:2rem">
-<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1.5rem">Site Config</h2>
-<form method="post" action="/admin/site" style="display:flex;flex-direction:column;gap:0.75rem">
-<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Title</label>
-<input name="title" value="{{$s.Title}}" style="padding:0.5rem;font-family:var(--font-sans)">
-<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Description</label>
-<input name="description" value="{{$s.Description}}" style="padding:0.5rem;font-family:var(--font-sans)">
-<label style="font-family:var(--font-mono);font-size:0.8rem;text-transform:uppercase">Bio (one paragraph per line)</label>
-<textarea name="bio" style="width:100%;min-height:120px;padding:0.5rem;font-family:var(--font-serif)">{{range $i, $p := $s.Bio}}{{if $i}}
-
+<main class="admin-main">
+<h2 class="admin-h2">Site Config</h2>
+<form method="post" action="/admin/site" class="admin-form">
+<label class="admin-label" for="s-title">Title</label>
+<input id="s-title" name="title" value="{{$s.Title}}" class="admin-input">
+<label class="admin-label" for="s-description">Description</label>
+<input id="s-description" name="description" value="{{$s.Description}}" class="admin-input">
+<label class="admin-label" for="s-bio">Bio (one paragraph per line)</label>
+<textarea id="s-bio" name="bio" class="admin-serif" rows="6">{{range $i, $p := $s.Bio}}{{if $i}}
 {{end}}{{$p}}{{end}}</textarea>
-<p style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted)">Nav, social, and RSS feeds are managed via the REST API.</p>
-<button type="submit" style="padding:0.5rem 1.5rem;background:var(--accent-yellow);border:none;font-family:var(--font-sans);font-weight:700;cursor:pointer;width:max-content">Save</button>
+<label class="admin-label" for="s-links-style">Links page style</label>
+<select id="s-links-style" name="links_style" class="admin-input">
+<option value="full"{{if $s.ShowLinkNotes}} selected{{end}}>Full — title with its summary line</option>
+<option value="minimal"{{if not $s.ShowLinkNotes}} selected{{end}}>Minimal — date :: title only</option>
+</select>
+<p class="admin-hint">Nav, social links, and RSS feeds are managed on the <a href="/admin/links">Links</a> page, via the REST API, or by editing content/site.yml directly.</p>
+<div class="admin-actions">
+<button type="submit" class="admin-btn">Save</button>
+</div>
 </form>
 </main>
 {{template "admin-footer"}}

@@ -1,25 +1,60 @@
 {{define "dashboard"}}{{$s := .Stats}}
 {{template "admin-header" .}}
-<main style="margin-top:2rem">
-<h2 style="font-family:var(--font-sans);text-transform:uppercase;margin-bottom:1rem">Dashboard</h2>
-<p style="font-family:var(--font-mono);font-size:1.5rem">Total views: <strong>{{$s.Total}}</strong></p>
-<div style="display:flex;gap:2rem;align-items:flex-start;flex-wrap:wrap;margin-top:1.5rem">
-<div style="flex:1;min-width:280px">
-<h3 style="text-transform:uppercase;font-family:var(--font-sans)">By article</h3>
-<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
-{{range $s.ByPath}}<li style="display:flex;justify-content:space-between;gap:1rem;padding:0.25rem 0;border-bottom:1px dashed var(--text-muted)"><span>{{.Path}}</span><strong>{{.Count}}</strong></li>{{end}}
+<main class="admin-main">
+<div class="admin-header-row">
+<h2 class="admin-h2">Dashboard</h2>
+<form method="post" action="/admin/regenerate"><button type="submit" class="admin-mini-btn">Regenerate site</button></form>
+</div>
+
+<div class="stat-cards">
+<div class="stat-card">
+<span class="stat-value">{{$s.Total}}</span>
+<span class="stat-label">Total views</span>
+</div>
+<div class="stat-card">
+<span class="stat-value">{{.PostCount}}</span>
+<span class="stat-label">Published{{if .DraftCount}} <em>+{{.DraftCount}} draft</em>{{end}}</span>
+</div>
+<div class="stat-card">
+<span class="stat-value">{{.LinkCount}}</span>
+<span class="stat-label">Links</span>
+</div>
+<div class="stat-card">
+<span class="stat-value">{{.Today}}</span>
+<span class="stat-label">Views today</span>
+</div>
+</div>
+
+<div class="stats-columns">
+<section class="stats-column">
+<h3 class="admin-h3">Most read</h3>
+{{if $s.ByPath}}<ul class="bar-list">
+{{range .TopPaths}}<li>
+<span class="bar-label"><a href="{{.Path}}" target="_blank" rel="noopener">{{.Path}}</a></span>
+<span class="bar-track"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
+<span class="bar-value">{{.Count}}</span>
+</li>{{end}}
+</ul>{{else}}<p class="admin-empty">No views recorded yet.</p>{{end}}
+</section>
+
+<section class="stats-column">
+<h3 class="admin-h3">Last 30 days</h3>
+{{if .Days}}<div class="spark">
+{{range .Days}}<span class="spark-bar" style="height:{{.Percent}}%" title="{{.Day}}: {{.Count}}"><span class="admin-sr-only">{{.Day}}: {{.Count}}</span></span>{{end}}
+</div>
+<div class="spark-axis"><span>{{.DayRangeStart}}</span><span>{{.DayRangeEnd}}</span></div>{{else}}<p class="admin-empty">No views recorded yet.</p>{{end}}
+</section>
+</div>
+
+<section class="admin-section">
+<h3 class="admin-h3">Recent posts</h3>
+<ul class="admin-list">
+{{range .Recent}}<li>
+<span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{end}}</span>
+<a class="admin-cancel" href="/posts/{{.Slug}}" target="_blank" rel="noopener">view</a>
+</li>{{else}}<li class="admin-empty">No posts yet. <a href="/admin/posts/new">Write the first one.</a></li>{{end}}
 </ul>
-</div>
-<div style="flex:1;min-width:280px">
-<h3 style="text-transform:uppercase;font-family:var(--font-sans)">By day (30d)</h3>
-<ul style="list-style:none;padding:0;font-family:var(--font-mono)">
-{{range $s.ByDay}}<li style="display:flex;justify-content:space-between;gap:1rem;padding:0.25rem 0;border-bottom:1px dashed var(--text-muted)"><span>{{.Day}}</span><strong>{{.Count}}</strong></li>{{end}}
-</ul>
-</div>
-</div>
-<form method="post" action="/admin/regenerate" style="margin-top:2rem">
-<button type="submit" style="padding:0.5rem 1.5rem;background:var(--accent-yellow);border:none;font-family:var(--font-sans);font-weight:700;cursor:pointer">Regenerate site</button>
-</form>
+</section>
 </main>
 {{template "admin-footer"}}
 {{end}}

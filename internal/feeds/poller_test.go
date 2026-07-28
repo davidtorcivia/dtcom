@@ -30,12 +30,12 @@ func TestPollFeedImportsItems(t *testing.T) {
 
 	poller := NewPoller(st)
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: true}}}
-	n := poller.Poll(site)
+	n := poller.Poll(context.Background(), site)
 	if n != 1 {
 		t.Errorf("imported %d items, want 1", n)
 	}
 	// second poll: dedup
-	n2 := poller.Poll(site)
+	n2 := poller.Poll(context.Background(), site)
 	if n2 != 0 {
 		t.Errorf("re-poll imported %d, want 0 (dedup)", n2)
 	}
@@ -59,7 +59,7 @@ func TestPollSkipsDisabledFeeds(t *testing.T) {
 
 	poller := NewPoller(st)
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: false}}}
-	n := poller.Poll(site)
+	n := poller.Poll(context.Background(), site)
 	if n != 0 {
 		t.Errorf("disabled feed imported %d, want 0", n)
 	}
@@ -92,12 +92,12 @@ func TestPollOnPollCallback(t *testing.T) {
 	poller := NewPoller(st)
 	poller.OnPoll = func(n int) { called += n }
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: true}}}
-	poller.Poll(site)
+	poller.Poll(context.Background(), site)
 	if called != 1 {
 		t.Errorf("OnPoll total = %d, want 1", called)
 	}
 	// second poll: dedup — OnPoll fires with 0 imports.
-	poller.Poll(site)
+	poller.Poll(context.Background(), site)
 	if called != 1 {
 		t.Errorf("OnPoll total after dedup = %d, want still 1", called)
 	}
@@ -133,7 +133,7 @@ func TestPollContinuesPastDeadFeed(t *testing.T) {
 		{URL: dead.URL, Label: "Dead", Enabled: true},
 		{URL: live.URL, Label: "Live", Enabled: true},
 	}}
-	n := poller.Poll(site)
+	n := poller.Poll(context.Background(), site)
 	if n != 1 {
 		t.Errorf("imported %d, want 1 (dead feed must not block live feed)", n)
 	}

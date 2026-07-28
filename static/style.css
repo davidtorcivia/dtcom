@@ -110,7 +110,11 @@ header.site-header {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   display: flex;
-  align-items: center;
+  /* Baseline, not center: an empty box's baseline is its bottom edge, so this
+     sits the square's bottom exactly on the text baseline. Centering aligned
+     it to the line box instead, which left it floating ~2px above the
+     letters. */
+  align-items: baseline;
   gap: 0.5rem;
   white-space: nowrap;
   flex-shrink: 0;
@@ -119,8 +123,16 @@ header.site-header {
 .brand-title::before {
   content: '';
   display: inline-block;
-  width: 0.72em;
-  height: 0.72em;
+  /* The square reads as exactly the height of the uppercase text beside it.
+     `cap` is the font's metric cap height, but bold glyphs paint a little
+     past it — Inter Bold's uppercase ink measures 0.766em against a 0.7275em
+     cap — so the square is scaled to the painted height rather than the
+     metric one. The plain em values are the fallback where `cap` is
+     unsupported. */
+  width: 0.766em;
+  height: 0.766em;
+  width: calc(1cap * 1.053);
+  height: calc(1cap * 1.053);
   background-color: var(--accent-yellow);
   flex-shrink: 0;
 }
@@ -335,7 +347,12 @@ mark, .highlight {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transform: translateY(-0.5px);
+  /* Optical centering, not box centering. A colon's ink occupies only the
+     lower 0.56em of its em box, so its ink centre sits 0.279em above the
+     baseline against 0.364em for the capitals beside it — the grid centres the
+     boxes, and the glyph lands visibly low. This lifts it by the difference,
+     in em so it tracks the font size. */
+  transform: translateY(-0.086em);
 }
 
 .index-title {
@@ -662,5 +679,175 @@ footer.site-footer {
 @media (min-width: 641px) {
   .nav-icon-label {
     display: none;
+  }
+}
+
+/* ==========================================================================
+   ACCESSIBILITY + PAGE STATES
+   Added during the pre-deploy audit: the reset above sets `outline: none` on
+   every element, which left keyboard users with no visible focus at all.
+   ========================================================================== */
+
+:focus-visible {
+  outline: 2px solid var(--accent-yellow) !important;
+  outline-offset: 2px;
+}
+
+/* Skip link — hidden until focused, then pinned to the top-left. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--accent-yellow);
+  color: #111;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* Respect a reduced-motion preference: the transitions here are decorative. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Empty states for the home and links indexes. */
+.empty-state {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  padding: 1.5rem 0;
+}
+
+/* Secondary lines inside an index row (a link's note, a search excerpt).
+   .index-row is a flex container, so these need to wrap onto their own full
+   width line instead of sitting beside the link. */
+.index-row:has(.index-note),
+.index-row.search-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.index-note,
+.index-excerpt {
+  flex: 0 0 100%;
+  padding: 0.35rem 0 0 3.1rem;
+  margin: 0;
+}
+
+.index-note {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   SEARCH PAGE
+   ========================================================================== */
+
+.search-box {
+  padding: 2rem 0 0.5rem;
+}
+
+/* Available to screen readers, not painted. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+#search-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+  color: var(--text);
+  border-bottom: 2px solid var(--text) !important;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+}
+
+#search-input:focus {
+  border-bottom-color: var(--accent-yellow) !important;
+}
+
+.search-status {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  min-height: 1.2em;
+}
+
+/* A search hit has no date, so its row uses only the symbol + title columns. */
+.index-row.search-row a {
+  grid-template-columns: 40px 1fr;
+}
+
+.index-excerpt {
+  font-family: var(--font-serif);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.index-excerpt mark {
+  background: var(--accent-yellow);
+  color: #111;
+}
+
+/* ==========================================================================
+   404
+   ========================================================================== */
+
+.notfound {
+  padding: 3rem 0;
+}
+
+/* Scoped to the prose paragraphs only. When the link row was also a <p>,
+   this rule out-specified .notfound-links and rendered the nav in the serif
+   face. */
+.notfound > p {
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
+  color: var(--text-muted);
+  margin-top: 1rem;
+  max-width: 46ch;
+}
+
+.notfound-links {
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.875rem;
+  margin-top: 1.5rem;
+}
+
+.notfound-links a {
+  border-bottom: 1px solid var(--text-muted) !important;
+}
+
+.notfound-links a:hover {
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .index-note,
+  .index-excerpt {
+    padding-left: 0;
   }
 }

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime/debug"
+	"sync"
+	"time"
 
+	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
@@ -36,23 +38,54 @@ type Deps struct {
 	Poller     *feeds.Poller
 	Auth       *auth.Auth
 	adminTmpls *adminTemplateStore
+	limits     *limiters
+
+	// Assets fingerprints /static URLs for the admin templates. Share the
+	// engine's instance so a rebuild's refresh is visible here too; left nil,
+	// one is created and then never updated, and an edited stylesheet keeps
+	// serving from cache under its old URL.
+	Assets *assets.Fingerprinter
+	assets *assets.Fingerprinter
+
+	// tokenTouched throttles last-used writes for API tokens; see touchToken.
+	tokenTouchMu sync.Mutex
+	tokenTouched map[int64]time.Time
 }
 
-// New wires every route group and wraps the mux in logging + panic recovery.
+// New wires every route group and wraps the mux in the shared middleware:
+// security headers → request logging → panic recovery → gzip.
 func New(d *Deps) http.Handler {
-	if d != nil {
-		// Admin templates live at <repo>/templates/admin. This path is relative
-		// to the process working directory, matching how build.Engine resolves
-		// "templates". A missing dir is tolerated (adminTmpls stays nil and
-		// admin handlers return 500) so the public site and API still work in
-		// stripped-down test setups.
-		if info, err := os.Stat("templates/admin"); err == nil && info.IsDir() {
-			if ts, err := newAdminTemplates(filepath.Join("templates", "admin")); err == nil {
-				d.adminTmpls = ts
-			} else {
-				slog.Warn("admin templates failed to load", "err", err)
-			}
+	d.limits = newLimiters()
+	d.tokenTouched = map[int64]time.Time{}
+	if d.Assets != nil {
+		d.assets = d.Assets
+	} else {
+		staticDir := "static"
+		if d.Cfg != nil && d.Cfg.StaticDir != "" {
+			staticDir = d.Cfg.StaticDir
 		}
+		d.assets = assets.New(staticDir)
+	}
+
+	// Admin templates live under <TemplatesDir>/admin, resolved the same way
+	// build.Engine resolves its own templates. A missing dir is tolerated
+	// (adminTmpls stays nil and admin handlers return 503) so the public site
+	// and API still work in stripped-down test setups.
+	tmplDir := "templates"
+	if d.Cfg != nil && d.Cfg.TemplatesDir != "" {
+		tmplDir = d.Cfg.TemplatesDir
+	}
+	adminDir := filepath.Join(tmplDir, "admin")
+	if info, err := os.Stat(adminDir); err == nil && info.IsDir() {
+		if ts, err := newAdminTemplates(adminDir, d.assets); err == nil {
+			d.adminTmpls = ts
+		} else {
+			// A broken admin template is a deploy-time mistake worth shouting
+			// about — the admin UI is entirely unavailable until it's fixed.
+			slog.Error("admin templates failed to parse; admin UI disabled", "dir", adminDir, "err", err)
+		}
+	} else {
+		slog.Warn("admin templates directory not found; admin UI disabled", "dir", adminDir)
 	}
 
 	mux := http.NewServeMux()
@@ -60,27 +93,5 @@ func New(d *Deps) http.Handler {
 	registerAdmin(mux, d)
 	registerAPI(mux, d)
 	registerMCP(mux, d)
-	return logging(recoverer(mux))
-}
-
-// logging emits one structured line per request.
-func logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slog.Info("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
-		next.ServeHTTP(w, r)
-	})
-}
-
-// recoverer turns panics in handlers into 500s so one bad request can't kill
-// the whole process.
-func recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				slog.Error("panic", "rec", rec, "stack", string(debug.Stack()))
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+	return securityHeaders(d.logging(recoverer(compression(mux))))
 }

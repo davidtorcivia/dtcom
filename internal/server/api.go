@@ -1,11 +1,14 @@
 package server
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,15 +30,35 @@ func registerAPI(mux *http.ServeMux, d *Deps) {
 	mux.Handle("/api/v1/", d.apiMiddleware(http.HandlerFunc(d.apiRouter)))
 }
 
-// apiMiddleware enforces the bearer token for every /api/v1/ request.
+// apiMiddleware enforces the bearer token for every /api/v1/ request and
+// throttles repeated failures so the token can't be guessed at line rate.
 func (d *Deps) apiMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !checkBearer(r, d.Cfg.APIToken) {
-			writeError(w, http.StatusUnauthorized, nil)
+		if !d.authorizeBearer(w, r) {
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// authorizeBearer checks the API token, writing the failure response itself.
+// Rate limiting keys on the client address and only charges a token on a
+// failed attempt, so a correctly-authenticated client is never throttled.
+func (d *Deps) authorizeBearer(w http.ResponseWriter, r *http.Request) bool {
+	if d.authorizeToken(r) {
+		return true
+	}
+	ip := d.clientIP(r)
+	if !d.limits.bearer.Allow(ip) {
+		w.Header().Set("Retry-After", "10")
+		writeError(w, http.StatusTooManyRequests, nil)
+		return false
+	}
+	slog.Warn("bearer auth failed", "ip", ip, "path", r.URL.Path)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="dtcom"`)
+	writeError(w, http.StatusUnauthorized, nil)
+	return false
 }
 
 // apiRouter dispatches a single /api/v1/ prefix by exact path + method. The
@@ -82,8 +105,11 @@ func (d *Deps) apiRouter(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, s)
 	case p == "/api/v1/feeds/refresh" && m == http.MethodPost:
-		n := d.Poller.Poll(d.Site())
+		n := d.Poller.Poll(r.Context(), d.Site())
 		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
+	// images
+	case p == "/api/v1/images" && m == http.MethodPost:
+		d.apiUploadImage(w, r)
 	default:
 		writeError(w, http.StatusNotFound, nil)
 	}
@@ -119,7 +145,7 @@ type articleSummary struct {
 }
 
 func (d *Deps) apiListArticles(w http.ResponseWriter, r *http.Request) {
-	arts, err := build.LoadArticles(filepath.Join(d.Cfg.ContentDir, "posts"))
+	arts, err := build.LoadArticles(d.postsDir())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -203,7 +229,10 @@ func (d *Deps) apiDeleteArticle(w http.ResponseWriter, r *http.Request) {
 // findArticleBySlug loads all articles and returns the one whose slug matches.
 // Returns (nil, nil) when no match — callers map that to 404.
 func (d *Deps) findArticleBySlug(slug string) (*build.Article, error) {
-	arts, err := build.LoadArticles(filepath.Join(d.Cfg.ContentDir, "posts"))
+	if !validSlug(slug) {
+		return nil, nil
+	}
+	arts, err := build.LoadArticles(d.postsDir())
 	if err != nil {
 		return nil, err
 	}
@@ -236,17 +265,52 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 	if !validDate(date) {
 		return "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
-	path := filepath.Join(d.Cfg.ContentDir, "posts", date+"-"+slug+".md")
-	if _, err := os.Stat(path); err == nil {
+	// A slug collision must be detected against every existing post, not just
+	// the <date>-<slug>.md filename: two posts with the same slug but
+	// different dates would silently overwrite each other's rendered page.
+	existing, err := d.findArticleBySlug(slug)
+	if err != nil {
+		return "", http.StatusInternalServerError, err
+	}
+	if existing != nil {
 		return "", http.StatusConflict, fmt.Errorf("article %q already exists", slug)
 	}
-	if err := os.WriteFile(path, []byte(renderArticleFile(in, date, slug)), 0o644); err != nil {
+	path := filepath.Join(d.postsDir(), date+"-"+slug+".md")
+	if err := writeFileAtomic(path, []byte(renderArticleFile(in, date, slug))); err != nil {
 		return "", http.StatusInternalServerError, err
 	}
 	if err := d.Engine.Rebuild(); err != nil {
 		return "", http.StatusInternalServerError, err
 	}
 	return slug, http.StatusCreated, nil
+}
+
+// writeFileAtomic writes to a temp file in the destination directory and
+// renames it into place, so a reader (the watcher-triggered rebuild, which
+// fires on the first write event) never observes a half-written post.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // updateArticle overwrites an existing post file (matched by slug) and
@@ -266,8 +330,19 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	if !validDate(date) {
 		return http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
-	if err := os.WriteFile(a.SourcePath, []byte(renderArticleFile(in, date, slug)), 0o644); err != nil {
+	if strings.TrimSpace(in.Title) == "" {
+		return http.StatusBadRequest, fmt.Errorf("title is required")
+	}
+	if err := writeFileAtomic(a.SourcePath, []byte(renderArticleFile(in, date, slug))); err != nil {
 		return http.StatusInternalServerError, err
+	}
+	// Keep the filename's date prefix in step with the frontmatter date, so
+	// content/posts stays sorted and self-describing after a date edit. The
+	// slug (everything after the prefix) is unchanged, so no URL moves.
+	if want := filepath.Join(filepath.Dir(a.SourcePath), date+"-"+slug+".md"); want != a.SourcePath {
+		if err := os.Rename(a.SourcePath, want); err != nil {
+			slog.Warn("could not rename post file after date change", "from", a.SourcePath, "to", want, "err", err)
+		}
 	}
 	if err := d.Engine.Rebuild(); err != nil {
 		return http.StatusInternalServerError, err
@@ -325,12 +400,15 @@ func (d *Deps) apiAddLink(w http.ResponseWriter, r *http.Request) {
 		Source: "manual", SortDate: sd,
 	})
 	if err != nil {
-		// AddLink returns an error for a disallowed href scheme (javascript:,
-		// data:, etc.) — a client-supplied input problem, so 400. Anything
-		// else is treated as a 500.
-		if strings.Contains(err.Error(), "disallowed scheme") {
+		// A disallowed href scheme (javascript:, data:, …) and a repeat href
+		// are both client-supplied input problems with their own status;
+		// anything else is a server fault.
+		switch {
+		case errors.Is(err, store.ErrDisallowedScheme):
 			writeError(w, http.StatusBadRequest, err)
-		} else {
+		case errors.Is(err, store.ErrDuplicateLink):
+			writeError(w, http.StatusConflict, err)
+		default:
 			writeError(w, http.StatusInternalServerError, err)
 		}
 		return
@@ -344,13 +422,24 @@ func (d *Deps) apiAddLink(w http.ResponseWriter, r *http.Request) {
 
 func (d *Deps) apiDeleteLink(w http.ResponseWriter, r *http.Request) {
 	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/links/")
-	var id int64
-	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id"))
+	// Sscanf("12abc", "%d") succeeds and leaves the trailing junk unread, so
+	// parse strictly instead.
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid id %q", idStr))
 		return
 	}
-	if err := d.Store.RemoveLink(id); err != nil {
+	removed, err := d.Store.RemoveLink(id)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !removed {
+		// Either no such id, or it's an RSS-imported link, which can't be
+		// deleted because the next poll would re-import it. Reporting 204
+		// here (as an earlier version did) told the caller a delete had
+		// happened when nothing changed.
+		writeError(w, http.StatusNotFound, nil)
 		return
 	}
 	if err := d.Engine.Rebuild(); err != nil {
@@ -379,28 +468,69 @@ func (d *Deps) apiUpdateSiteSection(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 // renderArticleFile assembles a YAML-frontmatter + markdown body for writing a
-// post file. Every string is double-quoted with backslash/dquote escaping so a
-// title containing a colon or quote can't corrupt the frontmatter.
+// post file. Every string is double-quoted with escaping so a title containing
+// a colon or quote can't corrupt the frontmatter.
 func renderArticleFile(in articleInput, date, slug string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString("title: " + yamlQuote(in.Title) + "\n")
 	sb.WriteString("date: " + date + "\n")
 	sb.WriteString("description: " + yamlQuote(in.Description) + "\n")
-	fmt.Fprintf(&sb, "tags: [%s]\n", strings.Join(in.Tags, ", "))
+	// Each tag is quoted individually: an unquoted tag containing a comma or a
+	// bracket would silently split or terminate the flow sequence, corrupting
+	// every subsequent field.
+	quoted := make([]string, 0, len(in.Tags))
+	for _, t := range in.Tags {
+		if t = strings.TrimSpace(t); t != "" {
+			quoted = append(quoted, yamlQuote(t))
+		}
+	}
+	fmt.Fprintf(&sb, "tags: [%s]\n", strings.Join(quoted, ", "))
 	sb.WriteString("draft: " + boolStr(in.Draft) + "\n")
 	sb.WriteString("---\n\n")
-	sb.WriteString(in.Body)
-	if !strings.HasSuffix(in.Body, "\n") {
+	body := normalizeNewlines(in.Body)
+	sb.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
 		sb.WriteString("\n")
 	}
 	return sb.String()
 }
 
+// yamlQuote renders s as a YAML double-quoted scalar. Backslash and quote are
+// escaped, and the control characters a browser textarea can smuggle in
+// (newline, tab, CR) are emitted as escapes rather than raw bytes, which would
+// otherwise break the single-line key: value form.
 func yamlQuote(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(&b, `\x%02x`, r)
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// normalizeNewlines converts the CRLF a browser form submits into the LF the
+// markdown renderer and the on-disk convention expect.
+func normalizeNewlines(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
 func boolStr(b bool) string {

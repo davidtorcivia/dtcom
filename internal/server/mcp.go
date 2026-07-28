@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,8 +28,9 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 
 	streamable := mcpserver.NewStreamableHTTPServer(srv)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		if !checkBearer(r, d.Cfg.APIToken) {
-			writeError(w, http.StatusUnauthorized, nil)
+		// Same throttled bearer check the REST API uses, so the token can't be
+		// guessed any faster here.
+		if !d.authorizeBearer(w, r) {
 			return
 		}
 		streamable.ServeHTTP(w, r)
@@ -45,7 +47,7 @@ func registerArticleTools(srv *mcpserver.MCPServer, d *Deps) {
 			mcp.WithDescription("List all articles with slug, title, date, draft status, and description."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			arts, err := build.LoadArticles(postsDir(d))
+			arts, err := build.LoadArticles(d.postsDir())
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -123,15 +125,18 @@ func registerArticleTools(srv *mcpserver.MCPServer, d *Deps) {
 			if a == nil {
 				return mcp.NewToolResultError(fmt.Sprintf("article %q not found", slug)), nil
 			}
-			// Build the input preserving existing fields unless overridden. The
-			// GetString default is used as the "unchanged" sentinel: callers
-			// who omit a field get back the original value.
+			// Build the input preserving existing fields unless overridden.
+			// Presence in the raw arguments — not emptiness — decides whether
+			// a field changes, so a caller can genuinely clear a description
+			// or empty a tag list. (Treating "" as "unchanged", as an earlier
+			// version did, made those edits impossible.)
+			args := rawArgs(req)
 			in := articleInput{
-				Title:       orDefault(req.GetString("title", ""), a.Title),
+				Title:       keepString(args, "title", a.Title),
 				Date:        req.GetString("date", ""),
-				Description: orDefault(req.GetString("description", ""), a.Description),
-				Tags:        orTags(req.GetStringSlice("tags", nil), a.Tags),
-				Body:        orDefault(req.GetString("body", ""), a.Body),
+				Description: keepString(args, "description", a.Description),
+				Tags:        keepStrings(args, "tags", a.Tags),
+				Body:        keepString(args, "body", a.Body),
 				Draft:       req.GetBool("draft", a.Draft),
 			}
 			status, err := d.updateArticle(slug, in)
@@ -209,6 +214,12 @@ func registerLinkTools(srv *mcpserver.MCPServer, d *Deps) {
 				Source: "manual", SortDate: time.Now().Unix(),
 			})
 			if err != nil {
+				switch {
+				case errors.Is(err, store.ErrDisallowedScheme):
+					return mcp.NewToolResultError("href must use http://, https://, or mailto:"), nil
+				case errors.Is(err, store.ErrDuplicateLink):
+					return mcp.NewToolResultError(fmt.Sprintf("a link with href %q already exists", href)), nil
+				}
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			if err := d.Engine.Rebuild(); err != nil {
@@ -228,8 +239,13 @@ func registerLinkTools(srv *mcpserver.MCPServer, d *Deps) {
 			if id <= 0 {
 				return mcp.NewToolResultError("invalid id"), nil
 			}
-			if err := d.Store.RemoveLink(int64(id)); err != nil {
+			removed, err := d.Store.RemoveLink(int64(id))
+			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if !removed {
+				return mcp.NewToolResultError(fmt.Sprintf(
+					"no manual link with id %d (RSS-imported links can't be removed; the next poll would re-import them)", id)), nil
 			}
 			if err := d.Engine.Rebuild(); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -325,7 +341,7 @@ func registerOpsTools(srv *mcpserver.MCPServer, d *Deps) {
 			mcp.WithDescription("Poll all enabled RSS feeds and import new items."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			n := d.Poller.Poll(d.Site())
+			n := d.Poller.Poll(ctx, d.Site())
 			return mcp.NewToolResultText(jsonMust(map[string]int{"imported": n})), nil
 		},
 	)
@@ -334,9 +350,6 @@ func registerOpsTools(srv *mcpserver.MCPServer, d *Deps) {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-// postsDir returns the posts directory under the configured content dir.
-func postsDir(d *Deps) string { return d.Cfg.ContentDir + "/posts" }
 
 // artSummaries projects articles to the same shape the REST list endpoint
 // emits, so the two surfaces agree.
@@ -350,21 +363,43 @@ func artSummaries(arts []build.Article) []articleSummary {
 	return out
 }
 
-// orDefault returns v when non-empty, else fallback. Used by update_article to
-// preserve unchanged fields.
-func orDefault(v, fallback string) string {
-	if v == "" {
-		return fallback
-	}
-	return v
+// rawArgs returns the tool call's argument object, or nil if it wasn't one.
+func rawArgs(req mcp.CallToolRequest) map[string]any {
+	m, _ := req.GetRawArguments().(map[string]any)
+	return m
 }
 
-// orTags returns tags when non-nil, else fallback.
-func orTags(tags, fallback []string) []string {
-	if tags == nil {
+// keepString returns the caller-supplied value for key, or fallback when the
+// key was not supplied at all.
+func keepString(args map[string]any, key, fallback string) string {
+	v, ok := args[key]
+	if !ok {
 		return fallback
 	}
-	return tags
+	s, ok := v.(string)
+	if !ok {
+		return fallback
+	}
+	return s
+}
+
+// keepStrings is keepString for a JSON array of strings.
+func keepStrings(args map[string]any, key string, fallback []string) []string {
+	v, ok := args[key]
+	if !ok {
+		return fallback
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return fallback
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // jsonMust encodes v; a marshal failure is a programmer error and panics.

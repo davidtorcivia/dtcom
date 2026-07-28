@@ -1,12 +1,15 @@
 package build
 
 import (
+	"bytes"
+	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 )
 
@@ -24,34 +27,92 @@ func (t *templateStore) Load(templatesDir string, funcs template.FuncMap) error 
 	return nil
 }
 
+// render executes a named template to outPath.
+//
+// The output is buffered and written in one shot rather than streamed into an
+// os.Create'd file: a template error partway through would otherwise leave a
+// truncated page on disk, which the server would then happily serve.
 func (t *templateStore) render(name, outPath string, data any) error {
+	if t.tmpl == nil {
+		return fmt.Errorf("templates not loaded")
+	}
+	var buf bytes.Buffer
+	if err := t.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		return fmt.Errorf("execute %s: %w", name, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(outPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return t.tmpl.ExecuteTemplate(f, name, data)
+	return os.WriteFile(outPath, buf.Bytes(), 0o644)
 }
 
 // helperFuncs returns the template function map used across all templates.
-func helperFuncs() template.FuncMap {
+func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 	return template.FuncMap{
+		// asset appends a content hash to a /static/ URL so the file can be
+		// cached hard and still update the moment it changes.
+		"asset": fp.URL,
+		// htmlSafe marks a string as pre-rendered HTML. Only ever applied to
+		// values the author controls: the goldmark output for a post body and
+		// the bio paragraphs from site.yml.
 		"htmlSafe": func(s string) template.HTML { return template.HTML(s) },
 		"formatDate": func(t time.Time) string {
 			return t.Format("2006-01-02")
 		},
+		// formatDateLong renders a human-facing date ("31 January 2026") for
+		// the byline, where the ISO form reads like a filename.
+		"formatDateLong": func(t time.Time) string {
+			return t.Format("2 January 2006")
+		},
 		"formatDateUnix": func(u int64) string {
 			return time.Unix(u, 0).UTC().Format("2006-01-02")
 		},
+		// rfc3339 renders a machine-readable date for <time datetime>.
+		"rfc3339":    func(t time.Time) string { return t.Format(time.RFC3339) },
 		"socialIcon": socialIconSVG,
+		// contactHref finds the site's contact address in the social list
+		// instead of hardcoding one in the footer, where it could (and did)
+		// drift out of step with site.yml.
+		"contactHref": func(site *siteconfig.Config) string {
+			if site == nil {
+				return ""
+			}
+			for _, s := range site.Social {
+				if s.Icon == "email" || strings.HasPrefix(strings.ToLower(s.Href), "mailto:") {
+					return s.Href
+				}
+			}
+			return ""
+		},
+		// absURL turns a site-relative path into an absolute one for og: tags
+		// and canonical links, which require it.
+		"absURL": func(site *siteconfig.Config, path string) string {
+			return strings.TrimRight(site.BaseURL, "/") + path
+		},
+		// ogImage returns the absolute URL of a post's social preview image,
+		// or "" when the post has no cover.
+		//
+		// It used to fall back to /static/images/og-default.jpg, a file that
+		// does not exist in this repo — every article advertised a broken
+		// image to every link unfurler. Returning "" lets the template omit
+		// the tag, and social platforms then fall back to their own defaults.
 		"ogImage": func(a Article, site *siteconfig.Config) string {
-			if a.Cover != "" {
+			if a.Cover == "" {
+				return ""
+			}
+			if strings.HasPrefix(a.Cover, "http://") || strings.HasPrefix(a.Cover, "https://") {
 				return a.Cover
 			}
-			return strings.TrimRight(site.BaseURL, "/") + "/static/images/og-default.jpg"
+			return strings.TrimRight(site.BaseURL, "/") + "/" + strings.TrimLeft(a.Cover, "/")
+		},
+		// readingTime estimates minutes to read a post body, at the ~200 wpm
+		// figure typical for prose.
+		"readingTime": func(body string) int {
+			words := len(strings.Fields(body))
+			if words == 0 {
+				return 1
+			}
+			return max(1, (words+199)/200)
 		},
 	}
 }
