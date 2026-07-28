@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -45,7 +46,8 @@ func checkBearer(r *http.Request, token string) bool {
 	if !strings.HasPrefix(v, "Bearer ") {
 		return false
 	}
-	return strings.TrimPrefix(v, "Bearer ") == token
+	provided := strings.TrimPrefix(v, "Bearer ")
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
 }
 
 // botUAKeywords are lowercased substrings that mark a User-Agent as automated.
