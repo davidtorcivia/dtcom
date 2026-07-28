@@ -59,3 +59,60 @@ func TestUpsertRSSLinkDedups(t *testing.T) {
 		t.Fatalf("expected dedup to 1, got %d", len(links))
 	}
 }
+
+// TestAddLinkRejectsJavascriptScheme verifies AddLink refuses to persist a
+// link whose href uses a dangerous scheme — these render as <a href="..."> on
+// /links and the scheme is an XSS vector (html/template escapes the attribute
+// but does not block javascript:).
+func TestAddLinkRejectsJavascriptScheme(t *testing.T) {
+	s := mustOpen(t)
+	defer s.Close()
+	for _, href := range []string{
+		"javascript:alert(1)",
+		"JAVASCRIPT:alert(1)", // case-insensitive
+		"data:text/html,<script>alert(1)</script>",
+		"vbscript:msgbox",
+		"ftp://x.com", // not in allowlist
+	} {
+		if _, err := s.AddLink(Link{Label: "X", Href: href, Source: "manual", SortDate: 1}); err == nil {
+			t.Errorf("AddLink(%q): expected error, got nil", href)
+		}
+	}
+}
+
+// TestAddLinkAcceptsHttpMailtoRelative verifies safe schemes/relative hrefs
+// are accepted unchanged.
+func TestAddLinkAcceptsHttpMailtoRelative(t *testing.T) {
+	s := mustOpen(t)
+	defer s.Close()
+	cases := []string{"https://x.com", "http://x.com", "mailto:a@b.com", "/posts/x", "#anchor"}
+	for i, href := range cases {
+		if _, err := s.AddLink(Link{Label: "L", Href: href, Source: "manual", SortDate: int64(i + 1)}); err != nil {
+			t.Errorf("href %q rejected: %v", href, err)
+		}
+	}
+	links, _ := s.ListLinks(100)
+	if len(links) != len(cases) {
+		t.Errorf("expected %d links persisted, got %d", len(cases), len(links))
+	}
+}
+
+// TestUpsertRSSLinkSkipsJavascriptScheme verifies RSS-imported links with a
+// disallowed scheme are silently skipped (not persisted, not flagged as
+// inserted) rather than erroring — RSS is unauthenticated inbound so the
+// caller can't push back, only refuse to render.
+func TestUpsertRSSLinkSkipsJavascriptScheme(t *testing.T) {
+	s := mustOpen(t)
+	defer s.Close()
+	_, inserted, err := s.UpsertRSSLink(Link{Label: "X", Href: "javascript:alert(1)", Source: "rss", FeedURL: "f", SortDate: 1})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if inserted {
+		t.Error("javascript: link should be skipped, not inserted")
+	}
+	links, _ := s.ListLinks(10)
+	if len(links) != 0 {
+		t.Errorf("expected 0 links, got %d", len(links))
+	}
+}
