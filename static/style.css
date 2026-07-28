@@ -2,7 +2,10 @@
    DAVID TORCIVIA — RAW BRUTALIST PRINT (NO CUTOFF HOVER HIGHLIGHT)
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap');
+/* Newsreader is fetched at italic 500 as well as roman 500: prose sits at 500,
+   and without the matching italic face the browser would synthesise an
+   oblique for every <em> and for the blockquote rule below. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&display=swap');
 
 :root,
 [data-theme="light"] {
@@ -51,6 +54,19 @@
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
+}
+
+/* Replaced elements never overflow their column.
+   Post bodies take images from anywhere — admin uploads, hotlinked remote
+   files — at whatever intrinsic size they happen to have, and an image wider
+   than the measure otherwise pushes the whole page into a horizontal scroll.
+   Capping the width and letting height follow keeps the aspect ratio intact.
+   Deliberately not applied to <svg>: the theme-toggle and social icons are
+   inline SVG with explicit width/height attributes, and height:auto would
+   fight them. */
+img, video, iframe {
+  max-width: 100%;
+  height: auto;
 }
 
 body {
@@ -158,6 +174,7 @@ header.site-header {
   gap: 1.25rem;
   font-family: var(--font-sans);
   font-size: 0.8125rem;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   flex-shrink: 0;
@@ -198,6 +215,7 @@ header.site-header {
   margin-bottom: 3.25rem;
   font-family: var(--font-serif);
   font-size: 1.1875rem;
+  font-weight: 500;
   line-height: 1.6;
   max-width: 960px;
 }
@@ -399,6 +417,7 @@ mark, .highlight {
 .article-prose-body {
   font-family: var(--font-serif);
   font-size: 1.1875rem;
+  font-weight: 500;
   line-height: 1.75;
   color: var(--text);
   max-width: 100%;
@@ -406,6 +425,14 @@ mark, .highlight {
 
 .article-prose-body p {
   margin-bottom: 1.75rem;
+}
+
+/* A standalone image is its own block, not a line in a paragraph. Markdown
+   wraps a lone ![](…) in a <p>, so without this it sits on a text baseline
+   and carries the paragraph's descender gap underneath it. */
+.article-prose-body img {
+  display: block;
+  margin: 2rem auto;
 }
 
 .article-prose-body h2 {
@@ -725,6 +752,7 @@ footer.site-footer {
 .empty-state {
   font-family: var(--font-sans);
   font-size: 0.875rem;
+  font-weight: 500;
   color: var(--text-muted);
   padding: 1.5rem 0;
 }
@@ -748,6 +776,7 @@ footer.site-footer {
 .index-note {
   font-family: var(--font-sans);
   font-size: 0.8125rem;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
@@ -801,6 +830,7 @@ footer.site-footer {
 .index-excerpt {
   font-family: var(--font-serif);
   font-size: 0.875rem;
+  font-weight: 500;
   line-height: 1.5;
   color: var(--text-muted);
 }
@@ -824,6 +854,7 @@ footer.site-footer {
 .notfound > p {
   font-family: var(--font-serif);
   font-size: 1.0625rem;
+  font-weight: 500;
   color: var(--text-muted);
   margin-top: 1rem;
   max-width: 46ch;
