@@ -1,0 +1,21 @@
+# Generated
+/public/
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Build output
+/dist/
+/dtcom
+/dtcom.exe
+
+# Editor / OS
+*.swp
+.DS_Store
+.idea/
+.vscode/
+
+# Env
+.env
