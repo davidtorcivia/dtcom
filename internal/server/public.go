@@ -57,12 +57,15 @@ func (d *Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // handleTrack records a page view from the client-side beacon. Bots and
 // malformed bodies are silently dropped (204) — a tracking beacon must never
-// surface a 500 to the browser.
+// surface a 500 to the browser. The body is capped at 1 KB (the payload is
+// just {"path":"/posts/x"}) so this unauthenticated endpoint can't be used to
+// OOM the server by streaming an unbounded body.
 func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 	if isBot(r.UserAgent()) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024) // 1 KB; beacon bodies are tiny
 	var body struct {
 		Path string `json:"path"`
 	}
