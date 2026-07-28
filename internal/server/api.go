@@ -82,11 +82,7 @@ func (d *Deps) apiRouter(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, s)
 	case p == "/api/v1/feeds/refresh" && m == http.MethodPost:
-		n, err := d.Poller.Poll(d.Site())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
+		n := d.Poller.Poll(d.Site())
 		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 	default:
 		writeError(w, http.StatusNotFound, nil)

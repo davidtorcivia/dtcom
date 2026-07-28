@@ -325,10 +325,7 @@ func registerOpsTools(srv *mcpserver.MCPServer, d *Deps) {
 			mcp.WithDescription("Poll all enabled RSS feeds and import new items."),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			n, err := d.Poller.Poll(d.Site())
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			n := d.Poller.Poll(d.Site())
 			return mcp.NewToolResultText(jsonMust(map[string]int{"imported": n})), nil
 		},
 	)
