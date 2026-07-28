@@ -55,14 +55,16 @@ func (d *Deps) clientIP(r *http.Request) string {
 // since posts are rendered from markdown with raw HTML enabled.
 //
 // 'unsafe-inline' is kept for style-src because the templates carry inline
-// style="" attributes, and the Google Fonts hosts are allowed because
-// style.css @imports its typography from them. Self-hosting the fonts would
-// let both exceptions go away.
+// style="" attributes.
+//
+// The fonts.googleapis.com and fonts.gstatic.com exceptions are gone: the
+// typography is served from static/fonts/ now, so 'self' covers it. Adding a
+// third-party font host back would mean reopening both.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: https:; " +
-	"font-src 'self' https://fonts.gstatic.com; " +
+	"font-src 'self'; " +
 	"connect-src 'self'; " +
 	"object-src 'none'; " +
 	"base-uri 'self'; " +

@@ -213,12 +213,17 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 		return err
 	}
 	site := e.cfg.Site()
+	ogImage, err := e.articleOGImage(a, site, written)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Join(e.cfg.PublicDir, "posts", a.Slug)
 	data := map[string]any{
 		"Site":    site,
 		"Article": a,
 		"HTML":    htmlBody,
 		"URL":     baseURL(site) + "/posts/" + a.Slug,
+		"OGImage": ogImage,
 	}
 	if err := e.renderPage("article", filepath.Join(dir, "index.html"), data, written); err != nil {
 		return err
@@ -234,9 +239,15 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 // renderHome renders the front page: bio + a date-desc index of published
 // articles.
 func (e *Engine) renderHome(published []Article, written *pathSet) error {
+	site := e.cfg.Site()
+	ogImage, err := e.siteOGImage(site, written)
+	if err != nil {
+		return err
+	}
 	return e.renderPage("home", filepath.Join(e.cfg.PublicDir, "index.html"), map[string]any{
-		"Site":     e.cfg.Site(),
+		"Site":     site,
 		"Articles": published,
+		"OGImage":  ogImage,
 	}, written)
 }
 
@@ -250,24 +261,42 @@ func (e *Engine) renderLinks(written *pathSet) error {
 			return err
 		}
 	}
+	site := e.cfg.Site()
+	ogImage, err := e.siteOGImage(site, written)
+	if err != nil {
+		return err
+	}
 	return e.renderPage("links", filepath.Join(e.cfg.PublicDir, "links", "index.html"), map[string]any{
-		"Site":  e.cfg.Site(),
-		"Links": links,
+		"Site":    site,
+		"Links":   links,
+		"OGImage": ogImage,
 	}, written)
 }
 
 // renderSearch renders the client-side search page. It is a static shell; the
 // results come from /api/search at runtime.
 func (e *Engine) renderSearch(written *pathSet) error {
+	site := e.cfg.Site()
+	ogImage, err := e.siteOGImage(site, written)
+	if err != nil {
+		return err
+	}
 	return e.renderPage("search", filepath.Join(e.cfg.PublicDir, "search", "index.html"), map[string]any{
-		"Site": e.cfg.Site(),
+		"Site":    site,
+		"OGImage": ogImage,
 	}, written)
 }
 
 // render404 renders the not-found page the server returns for unmatched routes.
 func (e *Engine) render404(written *pathSet) error {
+	site := e.cfg.Site()
+	ogImage, err := e.siteOGImage(site, written)
+	if err != nil {
+		return err
+	}
 	return e.renderPage("notfound", filepath.Join(e.cfg.PublicDir, "404.html"), map[string]any{
-		"Site": e.cfg.Site(),
+		"Site":    site,
+		"OGImage": ogImage,
 	}, written)
 }
 
@@ -290,7 +319,7 @@ func (e *Engine) renderFeed(published []Article, written *pathSet) error {
 	return e.writeFile(filepath.Join(e.cfg.PublicDir, "feed.xml"), []byte(out), written)
 }
 
-// renderSitemap writes sitemap.xml covering the home, links, search, and each
+// renderSitemap writes sitemap.xml covering the home, links, and each
 // published article. URLs are XML-escaped and carry the article date as
 // <lastmod>, which is what tells a crawler an existing page changed.
 func (e *Engine) renderSitemap(published []Article, written *pathSet) error {
@@ -312,7 +341,10 @@ func (e *Engine) renderSitemap(published []Article, written *pathSet) error {
 	}
 	addURL(base+"/", newest)
 	addURL(base+"/links", time.Time{})
-	addURL(base+"/search", time.Time{})
+	// /search is deliberately absent. The page carries <meta robots=noindex>
+	// — it is a search box whose results are fetched client-side, so there is
+	// nothing there for a crawler — and listing a noindex page in the sitemap
+	// asks Google to crawl something it is simultaneously told to drop.
 	for _, a := range published {
 		addURL(base+"/posts/"+a.Slug, a.Date)
 	}

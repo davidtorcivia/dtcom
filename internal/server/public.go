@@ -28,6 +28,11 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 	// uploaded images — content-addressed names, so cache them indefinitely
 	mux.Handle("GET /images/", cacheControl(imageCacheControl,
 		http.StripPrefix("/images/", http.FileServer(http.Dir(d.Cfg.ImagesDir)))))
+	// generated social preview cards. Named after their own content like the
+	// uploads above, so the same indefinite cache applies: a card's bytes can
+	// never change under a given URL, and an edited post produces a new one.
+	mux.Handle("GET /og/", cacheControl(imageCacheControl,
+		http.StripPrefix("/og/", http.FileServer(http.Dir(filepath.Join(d.Cfg.PublicDir, "og"))))))
 
 	// unauthed dynamic endpoints
 	mux.HandleFunc("GET /api/search", d.handleSearch)

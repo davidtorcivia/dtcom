@@ -90,21 +90,27 @@ func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 		"absURL": func(site *siteconfig.Config, path string) string {
 			return strings.TrimRight(site.BaseURL, "/") + path
 		},
-		// ogImage returns the absolute URL of a post's social preview image,
-		// or "" when the post has no cover.
-		//
-		// It used to fall back to /static/images/og-default.jpg, a file that
-		// does not exist in this repo — every article advertised a broken
-		// image to every link unfurler. Returning "" lets the template omit
-		// the tag, and social platforms then fall back to their own defaults.
-		"ogImage": func(a Article, site *siteconfig.Config) string {
-			if a.Cover == "" {
+		// twitterHandle digs the site's X/Twitter handle out of the social
+		// links so twitter:site and twitter:creator can be attributed without
+		// a second place to configure it. Returns "" when there is no X entry,
+		// and the template then omits the tags rather than emitting a bare @.
+		"twitterHandle": func(site *siteconfig.Config) string {
+			if site == nil {
 				return ""
 			}
-			if strings.HasPrefix(a.Cover, "http://") || strings.HasPrefix(a.Cover, "https://") {
-				return a.Cover
+			for _, s := range site.Social {
+				if s.Icon != "x" {
+					continue
+				}
+				// https://x.com/name or https://twitter.com/name → @name
+				u := strings.TrimRight(s.Href, "/")
+				if i := strings.LastIndex(u, "/"); i >= 0 {
+					if handle := u[i+1:]; handle != "" {
+						return "@" + strings.TrimPrefix(handle, "@")
+					}
+				}
 			}
-			return strings.TrimRight(site.BaseURL, "/") + "/" + strings.TrimLeft(a.Cover, "/")
+			return ""
 		},
 		// readingTime estimates minutes to read a post body, at the ~200 wpm
 		// figure typical for prose.
