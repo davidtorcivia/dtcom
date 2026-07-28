@@ -224,6 +224,9 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 		"HTML":    htmlBody,
 		"URL":     baseURL(site) + "/posts/" + a.Slug,
 		"OGImage": ogImage,
+		// KaTeX is ~600 KB of script and fonts. Most posts have no math, so
+		// the page only pulls it in when there is something to typeset.
+		"HasMath": markdown.HasMath(htmlBody),
 	}
 	if err := e.renderPage("article", filepath.Join(dir, "index.html"), data, written); err != nil {
 		return err

@@ -59,6 +59,11 @@
           // The response is this server's own rendering of the body the author
           // just typed, in the author-only admin origin.
           pv.innerHTML = html;
+          // Math arrives as raw LaTeX in .math spans; KaTeX has already run
+          // once at page load and will not see markup injected afterwards.
+          if (typeof window.dtcomTypesetMath === 'function') {
+            window.dtcomTypesetMath();
+          }
         })
         .catch(function () {
           pv.textContent = 'Preview failed. Your draft is unaffected — switch back to Write.';
