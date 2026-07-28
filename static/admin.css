@@ -340,6 +340,12 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
 .admin-add-form button { flex: 0 0 auto; }
 .admin-add-form select { flex: 0 0 auto; width: auto; }
 
+/* An add form that sits *below* its list needs to be pushed off the last row —
+   the nav and social editors on the Site page. Scoped to the adjacent-sibling
+   case on purpose: the feed and manual-link forms come before their lists and
+   already have the spacing they need. */
+.admin-list + .admin-add-form { margin-top: 0.75rem; }
+
 /* File inputs.
    The native control is a browser-drawn button plus a filename, and it ignores
    almost every property set on the input itself — it has to be styled through
