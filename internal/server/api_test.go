@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,5 +136,50 @@ func TestAPINotFound(t *testing.T) {
 	d.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
+	}
+}
+
+// TestAPIRejectsPathTraversalSlug verifies a caller-supplied slug containing
+// ".." traversal characters is sanitized (rather than reaching filepath.Join
+// verbatim and escaping the posts dir). The slug is run through slugify, which
+// drops every char except [a-z0-9-]; "../../evil" becomes "evil".
+func TestAPIRejectsPathTraversalSlug(t *testing.T) {
+	d := newTestDeps(t)
+	body := strings.NewReader(`{"title":"X","slug":"../../evil","date":"2026-01-01","body":"x"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/articles", body)
+	req.Header.Set("Authorization", "Bearer "+d.apiToken)
+	rec := httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	// should either 400 (rejected) or create with sanitized slug "evil" — NOT
+	// write outside posts/.
+	if rec.Code == http.StatusCreated {
+		// the traversal target would be content/../evil.md (i.e. parent of posts,
+		// in content dir) if the slug had escaped.
+		evilPath := filepath.Join(d.deps.Cfg.ContentDir, "..", "evil.md")
+		if _, err := os.Stat(evilPath); err == nil {
+			t.Fatalf("traversal succeeded — file written outside posts dir: %s", evilPath)
+		}
+	}
+	// verify no file with literal "../.." reached the filesystem.
+	matches, _ := filepath.Glob(filepath.Join(d.deps.Cfg.ContentDir, "posts", "*evil*.md"))
+	for _, m := range matches {
+		if strings.Contains(m, "..") {
+			t.Fatalf("unsanitized slug reached filesystem: %s", m)
+		}
+	}
+}
+
+// TestAPIRejectsBadDate verifies a caller-supplied date that isn't a strict
+// YYYY-MM-DD literal is rejected (rather than reaching filepath.Join and the
+// YAML frontmatter, where "../../etc" could escape the posts dir).
+func TestAPIRejectsBadDate(t *testing.T) {
+	d := newTestDeps(t)
+	body := strings.NewReader(`{"title":"X","date":"../../etc/passwd","body":"x"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/articles", body)
+	req.Header.Set("Authorization", "Bearer "+d.apiToken)
+	rec := httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for malicious date, got %d", rec.Code)
 	}
 }

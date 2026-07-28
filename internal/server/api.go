@@ -5,12 +5,20 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/store"
 )
+
+// dateRe matches a strict YYYY-MM-DD literal. Used to validate caller-supplied
+// dates before they reach filepath.Join / YAML frontmatter, since a malicious
+// date like "../../etc" could escape the posts dir.
+var dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+func validDate(s string) bool { return dateRe.MatchString(s) }
 
 // registerAPI wires the bearer-token-authenticated REST API under /api/v1/.
 // The public /api/search and /api/track endpoints (no auth) are registered
@@ -214,7 +222,11 @@ func (d *Deps) findArticleBySlug(slug string) (*build.Article, error) {
 // createArticle writes a new post file and rebuilds. Returns
 // (slug, httpStatus, err) where status is 409 on a filename collision.
 func (d *Deps) createArticle(in articleInput) (string, int, error) {
-	slug := in.Slug
+	// ALWAYS sanitize: never trust caller-supplied slug/date verbatim, since
+	// both reach filepath.Join and could escape the posts dir (path traversal).
+	// in.Slug is run through slugify (dropping every char except [a-z0-9-]),
+	// and in.Date is validated against a strict YYYY-MM-DD regex.
+	slug := slugify(in.Slug)
 	if slug == "" {
 		slug = slugify(in.Title)
 	}
@@ -224,6 +236,9 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 	date := in.Date
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
+	}
+	if !validDate(date) {
+		return "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
 	path := filepath.Join(d.Cfg.ContentDir, "posts", date+"-"+slug+".md")
 	if _, err := os.Stat(path); err == nil {
@@ -251,6 +266,9 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	date := in.Date
 	if date == "" {
 		date = a.Date.Format("2006-01-02")
+	}
+	if !validDate(date) {
+		return http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
 	if err := os.WriteFile(a.SourcePath, []byte(renderArticleFile(in, date, slug)), 0o644); err != nil {
 		return http.StatusInternalServerError, err
