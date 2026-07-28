@@ -1,0 +1,24 @@
+{{define "search"}}<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Search — {{.Site.Title}}</title>
+  <meta name="description" content="Search {{.Site.Title}}">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="site-container">
+  {{template "site-header" .}}
+  <main>
+    <div class="bio-section">
+      <p><input id="search-input" type="search" placeholder="Search articles…" autocomplete="off" style="width:100%;font-family:var(--font-sans);font-size:1rem;padding:0.5rem;"></p>
+    </div>
+    <div id="search-results" class="article-index-list"></div>
+  </main>
+  {{template "site-footer" .}}
+</div>
+</body>
+</html>{{end}}
