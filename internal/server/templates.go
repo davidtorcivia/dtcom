@@ -27,7 +27,7 @@ func newAdminTemplates(dir string) (*adminTemplateStore, error) {
 // minimal: join (for tag lists) and formatDate (for the date input value).
 func adminTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"join": func(ss []string, sep string) string { return strings.Join(ss, sep) },
+		"join":       func(ss []string, sep string) string { return strings.Join(ss, sep) },
 		"formatDate": func(t time.Time) string { return t.Format("2006-01-02") },
 	}
 }
