@@ -112,9 +112,17 @@ DTCOM_VERSION=$(git rev-parse --short HEAD) docker compose build
 docker compose up -d
 ```
 
-`content/` is tracked in git, so posts written through `/admin` on erebus
-show up as local modifications. Either commit them back or accept the
-divergence — but do not `git checkout` over them.
+`content/` is **not** tracked in git, so posts and site.yml written
+through `/admin` on erebus are invisible to `git pull` and survive it
+untouched. That is deliberate: the admin save path rewrites site.yml
+through a YAML round trip, so tracking it meant every edit on the running
+site produced a diff and every deploy risked a conflict.
+
+The flip side is that a `git clone` gives you an empty site. The binary
+seeds a default `site.yml` when it finds none and comes up serving
+nothing, which is the correct starting state for a new deployment and a
+data-loss event for an existing one. Restore `content/` from backup
+before starting a rebuilt checkout.
 
 Templates and static assets are bind-mounted, and the engine re-reads
 templates on every rebuild, so editing those takes effect without a
@@ -142,8 +150,11 @@ When you are satisfied with what is on 8102:
 
 ## Backups
 
-- `content/` — markdown and `site.yml`. In git.
+Neither of these is in git. Both are irreplaceable.
+
+- `content/` — markdown posts and `site.yml`. Not in git by design (see
+  Updating above). This is the only copy.
 - `data/` — `dtcom.db` (search index, view counts, links) and
-  `data/images/`. Not in git, not reconstructible. Back this up.
+  `data/images/`. Not reconstructible.
 
 `public/` is regenerated from the other two and can be deleted freely.

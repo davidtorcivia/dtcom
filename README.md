@@ -158,10 +158,12 @@ Worth knowing before this faces the internet:
 
 ## Backup
 
-Two things matter:
+Two things matter, and **neither is in this repo**:
 
-- `content/` — markdown source and `site.yml`. Keep it in git.
+- `content/` — markdown posts and `site.yml`. Gitignored on purpose: it is the author's data, not the project's source, and it is rewritten by `/admin`, the REST API, and the MCP tools as well as by hand. Tracking it meant every post and every feed subscription showed up as a diff against the repo. Back it up — the running site holds the only copy. (Keeping it in a *separate* git repo of your own is a perfectly good backup.)
 - the `data/` volume — `dtcom.db` (search index, view counts, links) and `data/images/` (uploaded images). Back this up; it is the only state the binary maintains.
+
+A fresh clone therefore has no content at all. The binary seeds a default `site.yml` when it finds none, so it comes up serving an empty site you can edit from `/admin` — restore from backup instead if you meant to redeploy an existing one.
 
 `public/` is regenerated from the other two and can be deleted freely.
 
@@ -197,7 +199,7 @@ internal/
   markdown/   goldmark setup
   siteconfig/ site.yml struct + load/save
   config/     env-var configuration and validation
-content/      markdown source (the source of truth)
+content/      markdown source (the source of truth; gitignored — see Backup)
 templates/    Go html/template (public + admin/)
 static/       theme.js, app.js, editor.js, admin.js, style.css, admin.css
 ```

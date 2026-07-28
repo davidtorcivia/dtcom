@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # startup. Creating them here also fixes /data: Docker seeds a fresh named
 # volume from the image path's contents *and ownership*, so the volume lands
 # writable instead of root-owned.
-RUN mkdir -p /skel/public /skel/data/images
+RUN mkdir -p /skel/public /skel/data/images /skel/content/posts
 
 # --- runtime stage ----------------------------------------------------------
 # distroless static: no shell, no libc; works because CGO_ENABLED=0. It ships
@@ -39,7 +39,12 @@ COPY --from=build /dtcom /dtcom
 # standalone too)
 COPY --chown=nonroot:nonroot templates/ /templates/
 COPY --chown=nonroot:nonroot static/ /static/
-COPY --chown=nonroot:nonroot content/ /content/
+# /content is created empty rather than copied from the build context.
+# content/ is the author's data, not the project's source, so it is gitignored
+# and a clean checkout has none of it — a COPY here would fail the build. The
+# binary seeds a default site.yml into this directory when it finds none, so
+# the image still runs standalone; a real deployment bind-mounts over it.
+COPY --from=build --chown=nonroot:nonroot /skel/content /content
 COPY --from=build --chown=nonroot:nonroot /skel/public /public
 COPY --from=build --chown=nonroot:nonroot /skel/data /data
 

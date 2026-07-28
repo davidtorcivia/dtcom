@@ -2,6 +2,7 @@
 package siteconfig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -51,6 +52,37 @@ type RSSFeed struct {
 	URL     string `yaml:"url"`
 	Label   string `yaml:"label"`
 	Enabled bool   `yaml:"enabled"`
+}
+
+// Default returns the config a brand-new site starts from.
+//
+// content/ is not tracked in git — it is the author's data, not the project's
+// source — so a fresh checkout has no site.yml at all. Rather than refuse to
+// start, the binary seeds this and comes up serving an empty but working site
+// that can then be edited from /admin.
+func Default() *Config {
+	return &Config{
+		Title:       "A dtcom site",
+		Author:      "",
+		Description: "",
+		Nav: []NavLink{
+			{Label: "Search", Href: "/search"},
+			{Label: "Links", Href: "/links"},
+		},
+		RSSFeeds: []RSSFeed{},
+	}
+}
+
+// LoadOrSeed reads site.yml, creating it from Default first if it is absent.
+// Any error other than "not there" is returned as-is: a malformed or
+// unreadable file is a problem to surface, not to overwrite.
+func LoadOrSeed(path string) (*Config, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err := Save(path, Default()); err != nil {
+			return nil, fmt.Errorf("seed site.yml: %w", err)
+		}
+	}
+	return Load(path)
 }
 
 // Load reads and parses a site.yml file.
