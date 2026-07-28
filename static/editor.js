@@ -1,5 +1,6 @@
-// Admin post editor: Write/Preview toggle (Obsidian-style, not dual-pane) and
-// image upload by button, paste, or drag-and-drop.
+// Admin post editor: Write/Preview toggle (Obsidian-style, not dual-pane),
+// image upload by button, paste, or drag-and-drop, and formatting shortcuts
+// (Ctrl/Cmd+B, I, E, K, Shift+X, Shift+H).
 (function () {
   'use strict';
 
@@ -167,6 +168,118 @@
       if (!saving && ta.value !== initial) {
         e.preventDefault();
         e.returnValue = '';
+      }
+    });
+
+    // --- Formatting shortcuts -------------------------------------------
+
+    // replaceRange swaps [from,to) for text, going through execCommand so the
+    // browser's own undo stack records it. Ctrl+Z after a shortcut should undo
+    // the formatting, not the last thing typed before it — assigning to
+    // ta.value directly wipes the stack outright.
+    function replaceRange(from, to, text) {
+      ta.focus();
+      ta.selectionStart = from;
+      ta.selectionEnd = to;
+      var ok = false;
+      try {
+        ok = document.execCommand && document.execCommand('insertText', false, text);
+      } catch (e) {
+        ok = false;
+      }
+      if (!ok) {
+        ta.value = ta.value.slice(0, from) + text + ta.value.slice(to);
+      }
+    }
+
+    // wrapSelection toggles a pair of markers around the selection.
+    //
+    // Toggling matters more than it sounds: without it a second Ctrl+B on
+    // already-bold text produces ****text****, which markdown renders as
+    // literal asterisks. The markers are recognised both inside the selection
+    // (the user selected them too) and immediately outside it (the common case
+    // after the first press, which leaves the inner text selected).
+    function wrapSelection(before, after, placeholder) {
+      var start = ta.selectionStart;
+      var end = ta.selectionEnd;
+      var value = ta.value;
+      var sel = value.slice(start, end);
+
+      var inner = null;
+      var from = start;
+      var to = end;
+      if (sel.length >= before.length + after.length &&
+          sel.slice(0, before.length) === before &&
+          sel.slice(sel.length - after.length) === after) {
+        inner = sel.slice(before.length, sel.length - after.length);
+      } else if (start >= before.length &&
+                 value.slice(start - before.length, start) === before &&
+                 value.slice(end, end + after.length) === after) {
+        inner = sel;
+        from = start - before.length;
+        to = end + after.length;
+      }
+
+      if (inner !== null) {
+        replaceRange(from, to, inner);
+        ta.selectionStart = from;
+        ta.selectionEnd = from + inner.length;
+        return;
+      }
+
+      var body = sel || placeholder || '';
+      replaceRange(start, end, before + body + after);
+      if (sel) {
+        // Keep the text selected so the shortcut can be pressed again to
+        // remove it, and so a second format can be layered on top.
+        ta.selectionStart = start + before.length;
+        ta.selectionEnd = start + before.length + body.length;
+      } else if (placeholder) {
+        // Select the placeholder so typing replaces it.
+        ta.selectionStart = start + before.length;
+        ta.selectionEnd = start + before.length + placeholder.length;
+      } else {
+        ta.selectionStart = ta.selectionEnd = start + before.length;
+      }
+    }
+
+    // A link is not a symmetric wrap: the selected text becomes the label and
+    // the cursor belongs in the empty parentheses, ready for the URL.
+    function insertLink() {
+      var start = ta.selectionStart;
+      var end = ta.selectionEnd;
+      var sel = ta.value.slice(start, end);
+      var label = sel || 'text';
+      replaceRange(start, end, '[' + label + ']()');
+      var caret = start + label.length + 3; // [ + label + ](
+      ta.selectionStart = ta.selectionEnd = caret;
+    }
+
+    // Keyed by the physical letter, lowercased, since Shift changes e.key.
+    var WRAPS = {
+      b: ['**', '**', 'bold'],
+      i: ['*', '*', 'italic'],
+      e: ['`', '`', 'code'],
+    };
+    var SHIFT_WRAPS = {
+      x: ['~~', '~~', 'strikethrough'],
+      h: ['==', '==', 'highlight'],
+    };
+
+    ta.addEventListener('keydown', function (e) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) {
+        return;
+      }
+      var key = (e.key || '').toLowerCase();
+      var spec = e.shiftKey ? SHIFT_WRAPS[key] : WRAPS[key];
+      if (spec) {
+        e.preventDefault();
+        wrapSelection(spec[0], spec[1], spec[2]);
+        return;
+      }
+      if (key === 'k' && !e.shiftKey) {
+        e.preventDefault();
+        insertLink();
       }
     });
 

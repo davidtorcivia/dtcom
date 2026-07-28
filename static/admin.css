@@ -104,6 +104,25 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
   margin-top: 1rem;
 }
 
+/* Editor shortcut legend. The reset strips borders globally, so the key caps
+   have to re-declare theirs with !important like the other bordered elements
+   in this file. */
+.editor-shortcuts {
+  margin-top: 0.35rem;
+  line-height: 1.9;
+}
+
+.editor-shortcuts kbd {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text);
+  background: var(--surface-hover);
+  border: 1px solid var(--text-muted) !important;
+  border-radius: 2px;
+  padding: 0.1em 0.35em;
+  white-space: nowrap;
+}
+
 /* Current-favicon preview above the upload form. */
 .admin-favicon-row {
   display: flex;
