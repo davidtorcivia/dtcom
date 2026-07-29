@@ -142,7 +142,30 @@
           d.close();
         }
       });
-      d.addEventListener('close', resetView);
+      // The fit size is measured from the file's own dimensions, which are not
+      // known until it has decoded. A picture already in the page's cache is
+      // usually decoded before the dialog opens; this covers the case where it
+      // is not.
+      d.querySelector('.lightbox-img').addEventListener('load', function () {
+        if (d.open && measure()) {
+          applyView(false);
+        }
+      });
+
+      d.addEventListener('close', function () {
+        // Drop the measured geometry along with the view. The next picture has
+        // a size of its own, and inheriting this one's would show it at the
+        // wrong size for a frame.
+        resetView();
+        var img = imgEl();
+        if (img) {
+          img.classList.remove('is-measured', 'is-gesturing', 'is-zoomed');
+          img.style.width = '';
+          img.style.height = '';
+        }
+        base = null;
+        layoutScale = 1;
+      });
       initGestures(d);
       return d;
     }
@@ -157,11 +180,21 @@
     // path, and with touch-action: none on the stage so the browser stops
     // trying to scroll and zoom the page underneath us.
 
-    var MAX_SCALE = 6;
-    var DISMISS_AT = 90;   // px of downward drag that closes it
+    var MIN_MAX_SCALE = 6;   // never offer less magnification than this
+    var ABS_MAX_SCALE = 20;  // ...and never more, whatever the file's size
+    var DISMISS_AT = 90;     // px of downward drag that closes it
     var DOUBLE_TAP_MS = 300;
+    var COMMIT_MS = 90;      // quiet time before the zoom is re-rasterised
 
+    // view.scale is the zoom relative to the fit size, and it is the only
+    // measure of magnification the gestures deal in.
     var view = { scale: 1, tx: 0, ty: 0 };
+    // base is the fit geometry in CSS pixels, plus the file's own dimensions.
+    var base = null;
+    // layoutScale is how much of view.scale has been baked into the element's
+    // width and height; the rest is left to the transform. See commitRaster.
+    var layoutScale = 1;
+    var commitTimer = null;
     var pointers = null;   // live pointers, by id
     var pinch = null;      // gesture origin while two fingers are down
     var drag = null;       // single-pointer pan or dismiss
@@ -172,14 +205,116 @@
     function imgEl() { return box && box.querySelector('.lightbox-img'); }
     function stageEl() { return box && box.querySelector('.lightbox-stage'); }
 
+    // measure sizes the picture to fit the stage and remembers that geometry.
+    //
+    // The layout size used to be left to CSS (max-width: 100%), which meant a
+    // phone laid a 2000px file out at ~390px and the browser rasterised — and
+    // often decoded — it at that size. Everything a pinch did after that was
+    // stretching those 390px. Owning the size here is what lets commitRaster
+    // ask for a bigger one.
+    function measure() {
+      var img = imgEl(), stage = stageEl();
+      if (!img || !stage || !img.naturalWidth || !img.naturalHeight) {
+        return false;
+      }
+      var cs = window.getComputedStyle(stage);
+      var availW = stage.clientWidth -
+        (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      var availH = stage.clientHeight -
+        (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      if (availW <= 0 || availH <= 0) {
+        return false;
+      }
+      // Fit, and never upscale past the file's own resolution: the same rule
+      // the stylesheet used to apply, now with the numbers in hand.
+      var fit = Math.min(availW / img.naturalWidth, availH / img.naturalHeight, 1);
+      base = {
+        w: img.naturalWidth * fit,
+        h: img.naturalHeight * fit,
+        natW: img.naturalWidth,
+        natH: img.naturalHeight,
+        // The frame the picture is centred in is the stage's content box, not
+        // its padding box, and the padding is not symmetrical — the close
+        // button gets a strip at one end. Panning is bounded against the same
+        // box the fit was measured against, so the edges line up.
+        availW: availW,
+        availH: availH,
+        padL: parseFloat(cs.paddingLeft) || 0,
+        padT: parseFloat(cs.paddingTop) || 0,
+      };
+      layoutScale = 1;
+      img.classList.add('is-measured');
+      img.style.width = base.w + 'px';
+      img.style.height = base.h + 'px';
+      return true;
+    }
+
+    // maxScale is the ceiling on magnification. Six times fit is plenty on a
+    // desktop, where the picture already opens near its full size, but on a
+    // phone the fit view shows a 2000px file at about a fifth of itself and
+    // stopping at 6x would stop short of detail the file actually holds. So
+    // the real limit is "far enough to put every stored pixel on the screen,
+    // with half again for a close look", and 6x is only the floor.
+    function maxScale() {
+      if (!base || !base.w) {
+        return MIN_MAX_SCALE;
+      }
+      return Math.min(ABS_MAX_SCALE,
+        Math.max(MIN_MAX_SCALE, (base.natW / base.w) * 1.5));
+    }
+
+    // commitRaster bakes the current zoom into the element's layout size.
+    //
+    // This is the fix for a blurry zoom. A transform scale is composited: the
+    // browser rasterises the layer once, at the size the layout asked for, and
+    // magnifying it enlarges those pixels rather than drawing new ones — which
+    // on a phone means zooming into a picture rendered at phone width. Setting
+    // the width and height instead is a layout change, and a layout change is
+    // always redrawn from the decoded image at the new size.
+    //
+    // The transform still runs the gesture, because it is smooth and layout is
+    // not; this only lands once the fingers are off. The two are swapped in a
+    // single frame with the transition off, so the picture sharpens in place
+    // rather than moving.
+    function commitRaster() {
+      var img = imgEl();
+      if (!img || !base || !box || !box.open) {
+        return;
+      }
+      // Past one stored pixel per device pixel there is nothing left to draw,
+      // and the layer would only get more expensive to hold — which on iOS is
+      // how a zoomed image turns into a blank rectangle. Beyond that point the
+      // transform can go on stretching; there is no detail being withheld.
+      var dpr = window.devicePixelRatio || 1;
+      var ceiling = Math.max(1, base.natW / (dpr * base.w));
+      var target = Math.min(view.scale, ceiling);
+      if (Math.abs(target - layoutScale) < 0.02) {
+        return;
+      }
+      layoutScale = target;
+      img.style.width = (base.w * layoutScale) + 'px';
+      img.style.height = (base.h * layoutScale) + 'px';
+      applyView(false);
+    }
+
+    function scheduleCommit(delay) {
+      clearTimeout(commitTimer);
+      commitTimer = setTimeout(commitRaster, delay === undefined ? COMMIT_MS : delay);
+    }
+
     function applyView(animate) {
       var img = imgEl();
       if (!img) {
         return;
       }
       img.style.transition = animate ? 'transform 0.18s ease-out' : '';
+      // Only the part of the zoom the layout is not already carrying goes into
+      // the transform. Both are relative to the fit size, so their product is
+      // always view.scale and the picture does not move when one becomes the
+      // other.
+      var residual = view.scale / (layoutScale || 1);
       img.style.transform =
-        'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.scale + ')';
+        'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + residual + ')';
       // Once magnified the image itself becomes draggable, so the cursor and
       // the dismiss-on-tap affordance should stop advertising otherwise.
       img.classList.toggle('is-zoomed', view.scale > 1.01);
@@ -189,10 +324,17 @@
       view.scale = 1;
       view.tx = 0;
       view.ty = 0;
+      clearTimeout(commitTimer);
       if (box) {
         var stage = stageEl();
         if (stage) {
           stage.style.opacity = '';
+        }
+        var img = imgEl();
+        if (img && base) {
+          layoutScale = 1;
+          img.style.width = base.w + 'px';
+          img.style.height = base.h + 'px';
         }
       }
       applyView(false);
@@ -205,8 +347,15 @@
       if (!img || !stage) {
         return;
       }
-      var maxX = Math.max(0, (img.offsetWidth * view.scale - stage.clientWidth) / 2);
-      var maxY = Math.max(0, (img.offsetHeight * view.scale - stage.clientHeight) / 2);
+      // The displayed size is the fit size times the zoom however it is
+      // currently split between layout and transform, so it is read from the
+      // measurement rather than from the element.
+      var shownW = base ? base.w * view.scale : img.offsetWidth * view.scale;
+      var shownH = base ? base.h * view.scale : img.offsetHeight * view.scale;
+      var frameW = base ? base.availW : stage.clientWidth;
+      var frameH = base ? base.availH : stage.clientHeight;
+      var maxX = Math.max(0, (shownW - frameW) / 2);
+      var maxY = Math.max(0, (shownH - frameH) / 2);
       view.tx = Math.min(maxX, Math.max(-maxX, view.tx));
       view.ty = Math.min(maxY, Math.max(-maxY, view.ty));
     }
@@ -219,8 +368,13 @@
         return;
       }
       var r = stage.getBoundingClientRect();
-      var ax = px - r.left - r.width / 2;
-      var ay = py - r.top - r.height / 2;
+      // Measured from where the picture actually sits, which is the middle of
+      // the stage's content box — the padding is one-sided, since the close
+      // button needs a strip clear at one end.
+      var cx = base ? r.left + base.padL + base.availW / 2 : r.left + r.width / 2;
+      var cy = base ? r.top + base.padT + base.availH / 2 : r.top + r.height / 2;
+      var ax = px - cx;
+      var ay = py - cy;
       var ratio = nextScale / view.scale;
       view.tx = ax - (ax - view.tx) * ratio;
       view.ty = ay - (ay - view.ty) * ratio;
@@ -252,6 +406,13 @@
 
       stage.addEventListener('pointerdown', function (e) {
         pointers.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY, type: e.pointerType });
+        // A commit mid-gesture would resize the element under the fingers, so
+        // any pending one waits for them to leave.
+        clearTimeout(commitTimer);
+        var img = imgEl();
+        if (img) {
+          img.classList.add('is-gesturing');
+        }
         if (stage.setPointerCapture) {
           try { stage.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
         }
@@ -280,7 +441,7 @@
 
         if (pinch && pointers.count() === 2) {
           var ps = pointerList();
-          var next = Math.min(MAX_SCALE, Math.max(1, pinch.scale * (distance(ps[0], ps[1]) / pinch.dist)));
+          var next = Math.min(maxScale(), Math.max(1, pinch.scale * (distance(ps[0], ps[1]) / pinch.dist)));
           zoomAbout(next, (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
           applyView(false);
           return;
@@ -319,6 +480,14 @@
         if (pointers.count() > 0) {
           return;
         }
+        // Every finger is off. The will-change hint goes with them: it pins the
+        // layer's raster scale, which is exactly what has to be let go of
+        // before the picture can be redrawn sharp at the zoom it landed on.
+        var img = imgEl();
+        if (img) {
+          img.classList.remove('is-gesturing');
+        }
+        var eased = false;
 
         // Dismiss if the flick went far enough; otherwise spring back.
         if (drag && drag.type === 'touch' && view.scale <= 1.01) {
@@ -330,12 +499,14 @@
           view.ty = 0;
           stage.style.opacity = '';
           applyView(true);
+          eased = true;
         }
         // A pinch that ended below 1x snaps back rather than leaving the
         // picture stranded small in the middle of a black screen.
         if (view.scale <= 1.01 && view.scale !== 1) {
           resetView();
           applyView(true);
+          eased = true;
         }
 
         // Double-tap toggles between fit and a close-up on the tapped point.
@@ -350,6 +521,7 @@
               zoomAbout(2.5, was.x, was.y);
             }
             applyView(true);
+            eased = true;
             lastTap = 0;
           } else {
             lastTap = now;
@@ -358,6 +530,9 @@
           }
         }
         drag = null;
+        // Redraw at the zoom the gesture settled on. Later when something is
+        // still easing, so the swap does not land in the middle of it.
+        scheduleCommit(eased ? 260 : COMMIT_MS);
       }
 
       stage.addEventListener('pointerup', endPointer);
@@ -370,13 +545,16 @@
           return;
         }
         e.preventDefault();
-        var next = Math.min(MAX_SCALE, Math.max(1, view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+        var next = Math.min(maxScale(), Math.max(1, view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
         zoomAbout(next, e.clientX, e.clientY);
         if (next === 1) {
           view.tx = 0;
           view.ty = 0;
         }
         applyView(false);
+        // A wheel arrives as a burst of events; the redraw waits for the end
+        // of it rather than resizing the element on every notch.
+        scheduleCommit(180);
       }, { passive: false });
     }
 
@@ -409,6 +587,16 @@
         return; // no <dialog> support: the image is still there on the page
       }
       var full = box.querySelector('.lightbox-img');
+      // Start from no geometry at all: whatever the last picture was measured
+      // and zoomed to says nothing about this one.
+      base = null;
+      layoutScale = 1;
+      full.classList.remove('is-measured', 'is-zoomed', 'is-gesturing');
+      full.style.width = '';
+      full.style.height = '';
+      // currentSrc is the file the page actually loaded, which is the full
+      // stored image: nothing here serves a scaled-down variant, so this is
+      // every pixel there is of it.
       full.src = img.currentSrc || img.src;
       // The alt still travels, even though nothing is drawn from it: the
       // picture in the dialog needs its own description for a screen reader.
@@ -417,6 +605,12 @@
       // was left on.
       resetView();
       box.showModal();
+      // Measured after showModal, since a closed dialog's stage has no size to
+      // fit against. A picture that has not decoded yet is measured by the load
+      // handler in build() instead.
+      if (full.complete && full.naturalWidth && measure()) {
+        applyView(false);
+      }
       box.querySelector('.lightbox-close').focus();
     }
 
@@ -469,7 +663,15 @@
     var resizeTimer = null;
     window.addEventListener('resize', function () {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(markAll, 150);
+      resizeTimer = setTimeout(function () {
+        markAll();
+        // An open lightbox is fitted to the stage, which has just changed size
+        // — a phone turned sideways would otherwise keep its portrait
+        // geometry, and the zoom maths with it.
+        if (box && box.open && measure()) {
+          resetView();
+        }
+      }, 150);
     });
 
     // Switching theme swaps which half of a light/dark pair is displayed, and
