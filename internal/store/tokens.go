@@ -60,7 +60,7 @@ func (s *Store) CreateAPIToken(name string) (string, *APIToken, error) {
 	raw := hex.EncodeToString(buf)
 
 	now := time.Now().Unix()
-	res, err := s.db.Exec(
+	res, err := s.conn().Exec(
 		`INSERT INTO api_tokens(name, token_hash, prefix, created_at) VALUES(?,?,?,?)`,
 		name, hashToken(raw), raw[:8], now,
 	)
@@ -77,7 +77,7 @@ func (s *Store) LookupAPIToken(raw string) (*APIToken, error) {
 		return nil, ErrTokenNotFound
 	}
 	var t APIToken
-	err := s.db.QueryRow(
+	err := s.conn().QueryRow(
 		`SELECT id, name, prefix, created_at, last_used_at, revoked_at
 		 FROM api_tokens WHERE token_hash = ? AND revoked_at = 0`,
 		hashToken(raw),
@@ -94,14 +94,14 @@ func (s *Store) LookupAPIToken(raw string) (*APIToken, error) {
 // TouchAPIToken records that a token was just used, so the admin page can show
 // which credentials are live and which are forgotten.
 func (s *Store) TouchAPIToken(id int64) error {
-	_, err := s.db.Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), id)
+	_, err := s.conn().Exec(`UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), id)
 	return err
 }
 
 // ListAPITokens returns every token, newest first, including revoked ones so
 // the admin page can show what was withdrawn and when.
 func (s *Store) ListAPITokens() ([]APIToken, error) {
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		`SELECT id, name, prefix, created_at, last_used_at, revoked_at
 		 FROM api_tokens ORDER BY revoked_at = 0 DESC, created_at DESC`)
 	if err != nil {
@@ -123,7 +123,7 @@ func (s *Store) ListAPITokens() ([]APIToken, error) {
 // revoked. Revoking is a soft delete: the row stays so the admin page can show
 // that the credential existed and when it stopped working.
 func (s *Store) RevokeAPIToken(id int64) (bool, error) {
-	res, err := s.db.Exec(
+	res, err := s.conn().Exec(
 		`UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at = 0`,
 		time.Now().Unix(), id)
 	if err != nil {
@@ -139,6 +139,6 @@ func (s *Store) RevokeAPIToken(id int64) (bool, error) {
 // CountActiveAPITokens reports how many tokens can currently authenticate.
 func (s *Store) CountActiveAPITokens() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT count(*) FROM api_tokens WHERE revoked_at = 0`).Scan(&n)
+	err := s.conn().QueryRow(`SELECT count(*) FROM api_tokens WHERE revoked_at = 0`).Scan(&n)
 	return n, err
 }

@@ -4,16 +4,46 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 
 	_ "modernc.org/sqlite" // pure-Go sqlite driver
 )
 
 type Store struct {
-	db *sql.DB
+	// mu guards the pool pointer itself, not the queries running through it.
+	// Only ReplaceWith takes it for writing, and only for as long as it takes
+	// to close one pool and open another.
+	mu   sync.RWMutex
+	db   *sql.DB
+	path string
+}
+
+// conn returns the current pool. Every query goes through it so that a restore,
+// which swaps the pool underneath, is picked up by whatever runs next rather
+// than by whatever happens to be restarted.
+func (s *Store) conn() *sql.DB {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.db
 }
 
 // Open opens (or creates) the database at path and runs migrations.
 func Open(path string) (*Store, error) {
+	db, err := openDB(path)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{db: db, path: path}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return s, nil
+}
+
+// openDB opens the pool with the pragmas this database is always used under.
+// Separate from Open because a restore reopens the same file the same way.
+func openDB(path string) (*sql.DB, error) {
 	// busy_timeout: with a single connection, lock contention is rare, but WAL
 	// checkpoints and an external reader (a backup, a sqlite3 shell) can still
 	// hold a lock briefly — waiting beats failing the request.
@@ -36,15 +66,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("open db %s: %w", path, err)
 	}
-	s := &Store{db: db}
-	if err := s.migrate(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
-	return s, nil
+	return db, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error { return s.conn().Close() }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS links (
@@ -95,6 +120,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
 `
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
+	_, err := s.conn().Exec(schema)
 	return err
 }

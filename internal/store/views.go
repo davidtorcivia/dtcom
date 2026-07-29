@@ -11,7 +11,7 @@ func (s *Store) RecordView(path, day, ipHash string) error {
 	if path == "" || day == "" {
 		return nil
 	}
-	_, err := s.db.Exec(
+	_, err := s.conn().Exec(
 		`INSERT INTO views(path, day, ip_hash, ts) VALUES(?,?,?,?)
 		 ON CONFLICT(path, day, ip_hash) DO NOTHING`,
 		path, day, ipHash, time.Now().Unix(),
@@ -39,10 +39,10 @@ type DayCount struct {
 
 func (s *Store) Stats() (*Stats, error) {
 	st := &Stats{}
-	if err := s.db.QueryRow("SELECT count(*) FROM views").Scan(&st.Total); err != nil {
+	if err := s.conn().QueryRow("SELECT count(*) FROM views").Scan(&st.Total); err != nil {
 		return nil, fmt.Errorf("total views: %w", err)
 	}
-	rows, err := s.db.Query("SELECT path, count(*) c FROM views GROUP BY path ORDER BY c DESC LIMIT 50")
+	rows, err := s.conn().Query("SELECT path, count(*) c FROM views GROUP BY path ORDER BY c DESC LIMIT 50")
 	if err != nil {
 		return nil, fmt.Errorf("views by path: %w", err)
 	}
@@ -58,7 +58,7 @@ func (s *Store) Stats() (*Stats, error) {
 		return nil, err
 	}
 
-	dayRows, err := s.db.Query(`SELECT day, count(*) c FROM views
+	dayRows, err := s.conn().Query(`SELECT day, count(*) c FROM views
 		WHERE day >= date('now','-30 days') GROUP BY day ORDER BY day`)
 	if err != nil {
 		return nil, fmt.Errorf("views by day: %w", err)

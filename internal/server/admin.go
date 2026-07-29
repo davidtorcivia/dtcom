@@ -46,6 +46,7 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/tokens", d.requireAuth(d.adminTokenCreate))
 	mux.HandleFunc("POST /admin/tokens/{id}/revoke", d.requireAuth(d.adminTokenRevoke))
 	mux.HandleFunc("POST /admin/regenerate", d.requireAuth(d.adminRegenerate))
+	registerAdminBackups(mux, d)
 	registerAdminFeeds(mux, d)
 	registerAdminSiteLists(mux, d)
 }

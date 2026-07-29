@@ -81,7 +81,7 @@ func (s *Store) AddLink(l Link) (int64, error) {
 	if l.Label = strings.TrimSpace(l.Label); l.Label == "" {
 		return 0, fmt.Errorf("link label is required")
 	}
-	res, err := s.db.Exec(
+	res, err := s.conn().Exec(
 		`INSERT INTO links(label, href, note, source, sort_date, feed_url, created_at)
 		 VALUES(?,?,?,?,?,?,?)`,
 		l.Label, href, l.Note, l.Source, l.SortDate, l.FeedURL, l.CreatedAt,
@@ -120,7 +120,7 @@ func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 		l.Label = href
 	}
 	l.Note = truncate(collapseSpace(plainText(l.Note)), maxLinkNote)
-	res, err := s.db.Exec(
+	res, err := s.conn().Exec(
 		`INSERT INTO links(label, href, note, source, sort_date, feed_url, created_at)
 		 VALUES(?,?,?,?,?,?,?)
 		 ON CONFLICT DO NOTHING`,
@@ -132,7 +132,7 @@ func (s *Store) UpsertRSSLink(l Link) (int64, bool, error) {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		var id int64
-		_ = s.db.QueryRow("SELECT id FROM links WHERE href=?", href).Scan(&id)
+		_ = s.conn().QueryRow("SELECT id FROM links WHERE href=?", href).Scan(&id)
 		return id, false, nil
 	}
 	id, _ := res.LastInsertId()
@@ -194,7 +194,7 @@ func truncate(s string, n int) string {
 // would re-import them — and the caller needs to know that so it can say so
 // instead of reporting a silent success.
 func (s *Store) RemoveLink(id int64) (bool, error) {
-	res, err := s.db.Exec("DELETE FROM links WHERE id=? AND source='manual'", id)
+	res, err := s.conn().Exec("DELETE FROM links WHERE id=? AND source='manual'", id)
 	if err != nil {
 		return false, fmt.Errorf("remove link: %w", err)
 	}
@@ -210,7 +210,7 @@ func (s *Store) ListLinks(limit int) ([]Link, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		`SELECT id, label, href, note, source, sort_date, feed_url
 		 FROM links ORDER BY sort_date DESC LIMIT ?`,
 		limit,

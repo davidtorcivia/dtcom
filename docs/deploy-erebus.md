@@ -196,3 +196,49 @@ Neither of these is in git. Both are irreplaceable.
   `data/images/`. Not reconstructible.
 
 `public/` is regenerated from the other two and can be deleted freely.
+
+### The built-in ones
+
+`/admin/backups` takes an archive of all of it — posts, `site.yml`, a
+consistent snapshot of the database, and the uploaded image masters — daily,
+and on demand. They are written to `data/backups/` and thinned on a rolling
+schedule: everything from the last week, then one a week for a month, then one
+a month for half a year.
+
+Image renditions and `public/` are deliberately not in an archive. Both are
+regenerated after a restore, and including them would roughly quadruple the
+size of every one.
+
+Restoring is on the same page, behind typing the archive's date. It takes a
+fresh archive of the current state first, so a restore chosen in error is
+itself undoable — that copy is marked `pre-restore` and is never pruned.
+
+Two things this does not do:
+
+- **It does not leave the machine.** `data/backups/` is on the same disk as
+  the thing it is backing up, which covers a deleted post and does not cover a
+  dead drive. Downloading an archive from the admin page is the copy that
+  leaves; `DTCOM_BACKUP_DIR` pointed at another mount is the standing version
+  of the same idea. An S3/R2 destination is the intended next step — see the
+  `Destination` interface in `internal/backup/destination.go`.
+- **It does not back up the environment.** `.env` holds the session key, the
+  API token, and the admin password hash, and no archive contains it. Losing
+  it does not lose the site, but it does lose the way in.
+
+### Restoring by hand
+
+Without the admin page — a container that will not start, say:
+
+```bash
+cd /nvme-mirror/apps/dtcom
+docker compose down
+tar xzf data/backups/dtcom-<timestamp>-<kind>.tar.gz -C /tmp/restore
+cp -a /tmp/restore/content/. content/
+cp -a /tmp/restore/data/images/. data/images/
+cp /tmp/restore/data/dtcom.db data/dtcom.db
+rm -f data/dtcom.db-wal data/dtcom.db-shm   # they belong to the old database
+docker compose up -d
+```
+
+The renditions regenerate on the next startup, and the first rebuild writes
+`public/` again.

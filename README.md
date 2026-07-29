@@ -87,6 +87,8 @@ Tag a pair of URLs `#light` and `#dark` and they collapse into a single figure t
 
 **Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each raster upload is re-encoded (which strips EXIF), downscaled to 2560px, stored under a content-derived name, and cut into the renditions described above. An upload that carries transparency is kept lossless whatever it arrived as — the decoded pixels decide that, not the file extension. SVG is accepted too and stored as written — there is nothing to resample in a vector — after being validated as a real SVG document.
 
+**Backups.** `/admin/backups` — `content/` and `data/` are not in git, by design, so the machine the site runs on holds the only copy of every post and every picture. An archive of all of it, plus a consistent snapshot of the database, is taken daily and on demand, and thinned on a rolling schedule: everything from the last week, then one a week for a month, then one a month for half a year. Image renditions and `public/` are left out and regenerated on restore. Restoring is on the same page, behind typing the archive's date, and takes a fresh archive of the current state first — so a restore chosen in error is itself undoable. `DTCOM_BACKUP_DIR` moves the archives to another mount; `DTCOM_BACKUP_INTERVAL=0` leaves them to be taken by hand.
+
 **API / MCP.** See the two sections below. These are the paths an LLM client uses. `/admin/integrations` shows the live token, a ready-to-paste MCP client config, and the full endpoint list.
 
 ## Site configuration

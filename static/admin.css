@@ -843,3 +843,109 @@ input[type="file"]:focus-visible::file-selector-button {
   font-size: 0.8125rem;
   word-break: break-all;
 }
+
+/* ---------------------------------------------------------------------------
+   Backups
+
+   A page that is mostly a list of files and one button that replaces the site.
+   The weight of the styling follows that: the actions are quiet, and the one
+   irreversible thing is behind a disclosure the operator has to open and type
+   into.
+   -------------------------------------------------------------------------- */
+
+/* The counterpart to .admin-error, for when something went right. Same shape so
+   the two occupy the same place on the page, in the calmer colour. */
+/* The reset at the top of style.css strips borders with !important, so every
+   bordered element in this file re-declares its own the same way. */
+.admin-notice {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  color: var(--text);
+  border-left: 3px solid var(--accent-yellow) !important;
+  padding: 0.6rem 0 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.5rem 2.5rem;
+}
+
+/* Facts about the schedule, as a definition list rather than prose: they are
+   four values that each answer one question. */
+.backup-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 2rem;
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+}
+
+.backup-facts dt {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.6875rem;
+}
+
+.backup-facts dd { margin: 0.1rem 0 0 0; }
+.backup-facts code { font-family: var(--font-mono); word-break: break-all; }
+
+.backup-table td { vertical-align: middle; }
+.backup-table td:last-child { text-align: right; white-space: nowrap; }
+.backup-when { font-family: var(--font-mono); font-size: 0.8125rem; }
+.backup-row-actions { display: flex; gap: 0.4rem; justify-content: flex-end; align-items: center; }
+
+/* The copy taken automatically just before a restore. Marked, because it is the
+   one to reach for when a restore turned out to be the wrong idea. */
+.backup-safety td { color: var(--text-muted); }
+.backup-kind-safety {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--accent-yellow) !important;
+}
+
+/* A <details> so the confirmation field is not sitting open on every row,
+   inviting a stray Enter. The summary is styled as the button it replaces. */
+.backup-restore { display: inline-block; }
+.backup-restore summary { list-style: none; cursor: pointer; }
+.backup-restore summary::-webkit-details-marker { display: none; }
+.backup-restore[open] summary { background: var(--accent-yellow); color: #111; }
+
+.backup-restore-form {
+  position: absolute;
+  right: 0;
+  z-index: 2;
+  width: min(24rem, calc(100vw - 3rem));
+  margin-top: 0.4rem;
+  padding: 0.9rem 1rem;
+  text-align: left;
+  white-space: normal;
+  background: var(--bg);
+  border: 1px solid var(--text) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.backup-restore-form label {
+  display: block;
+  margin: 0.6rem 0 0.3rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+}
+
+.backup-restore-form input { width: 100%; }
+.backup-restore-form button { margin-top: 0.6rem; }
+
+/* The row has to be a positioning context, or the panel above escapes to the
+   page corner. */
+.backup-table td { position: relative; }
+
+@media (max-width: 640px) {
+  .backup-row-actions { flex-wrap: wrap; justify-content: flex-start; }
+  .backup-table td:last-child { text-align: left; white-space: normal; }
+}

@@ -1,0 +1,82 @@
+{{define "backups"}}
+{{template "admin-header" .}}
+<main class="admin-main">
+<h2 class="admin-h2">Backups</h2>
+<p class="admin-lede">Posts, <code>site.yml</code>, the database, and the uploaded pictures — everything on this
+machine that could not be worked out again from something else. Neither <code>content/</code> nor
+<code>data/</code> is in git, so until one of these archives leaves the building, this is the only copy.</p>
+
+{{with .Notice}}<p class="admin-notice" role="status">{{.}}</p>{{end}}
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+
+<section class="admin-section">
+<div class="backup-actions">
+<form method="post" action="/admin/backups" class="admin-inline-form">
+<button type="submit">Back up now</button>
+</form>
+<dl class="backup-facts">
+<div><dt>Written to</dt><dd><code>{{.Destination}}</code></dd></div>
+<div><dt>Schedule</dt><dd>{{.Schedule}}</dd></div>
+<div><dt>Kept</dt><dd>{{.Policy}}</dd></div>
+<div><dt>Using</dt><dd>{{.Total}}</dd></div>
+</dl>
+</div>
+</section>
+
+<section class="admin-section">
+{{if .Backups}}
+<table class="endpoint-table backup-table">
+<thead><tr><th>Taken</th><th>Reason</th><th>Size</th><th></th></tr></thead>
+<tbody>
+{{range .Backups}}
+<tr{{if .IsSafety}} class="backup-safety"{{end}}>
+<td><span class="backup-when">{{.Created.Format "2006-01-02 15:04"}}</span>
+    <span class="admin-source-flag">{{.Ago}}</span></td>
+<td>{{if .IsSafety}}<span class="backup-kind-safety">before a restore</span>{{else}}{{.Kind}}{{end}}</td>
+<td>{{.Size}}</td>
+<td class="backup-row-actions">
+  <a class="admin-mini-btn" href="/admin/backups/{{.Name}}/download">Download</a>
+
+  {{/* Restore asks for the date to be typed rather than offering a plain
+       button. Everything below it gets replaced, and a click is too cheap for
+       that — the server checks the typed value too, so this is not merely a
+       front-end courtesy. */}}
+  <details class="backup-restore">
+  <summary class="admin-mini-btn">Restore</summary>
+  <form method="post" action="/admin/backups/{{.Name}}/restore" class="backup-restore-form">
+    <p class="admin-hint">Replaces the posts, <code>site.yml</code>, the database and the image masters with
+    this archive's. A backup of the current state is taken first and kept.</p>
+    <label for="c-{{.Name}}">Type <strong>{{.Confirm}}</strong> to confirm</label>
+    <input id="c-{{.Name}}" name="confirm" autocomplete="off" placeholder="{{.Confirm}}" required>
+    <button type="submit">Restore this backup</button>
+  </form>
+  </details>
+
+  <form method="post" action="/admin/backups/{{.Name}}/delete" class="admin-inline-form"
+    data-confirm="Delete this backup?"
+    data-confirm-detail="The archive from {{.Created.Format "2006-01-02 15:04"}} is removed from disk. Nothing else changes."
+    data-confirm-action="Delete backup"><button type="submit" class="admin-link-btn">delete</button></form>
+</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="admin-hint">No backups yet. One is taken automatically on the schedule above; “Back up now” does it
+immediately.</p>
+{{end}}
+</section>
+
+<section class="admin-section">
+<h3 class="admin-h3">What is in one</h3>
+<p class="admin-hint">Posts and <code>site.yml</code> exactly as written, a consistent snapshot of the
+database, and the uploaded image masters. Not the renditions and not <code>public/</code> — both are
+regenerated after a restore, and keeping them would roughly quadruple every archive to protect files that
+can be made again in seconds.</p>
+<p class="admin-hint">These are written to the same machine the site runs on, which covers a mistake but not
+a failed disk. Downloading one puts a copy somewhere else, which is the part a backup on the same drive
+cannot do for you.</p>
+</section>
+</main>
+{{template "admin-footer" .}}
+{{end}}
