@@ -3,6 +3,7 @@ package backup
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,12 @@ func (f *fakeDB) Snapshot(path string) error {
 		return os.ErrPermission
 	}
 	return os.WriteFile(path, []byte(f.content), 0o644)
+}
+
+func (f *fakeDB) ContentFingerprint() (string, error) {
+	// Stands in for the authored rows of the database. Changing f.content is
+	// how a test says "somebody edited a link".
+	return f.content, nil
 }
 
 func (f *fakeDB) ReplaceWith(path string) error {
@@ -163,20 +170,36 @@ func TestCreateHoldsWhatCannotBeRemade(t *testing.T) {
 		"content/posts/one.md",
 		"content/posts/two.md",
 		"data/dtcom.db",
-		"data/images/aaaa.png",
-		"data/images/bbbb.jpg",
 	} {
 		if _, ok := members[want]; !ok {
 			t.Errorf("archive is missing %s (has %v)", want, keys(members))
 		}
 	}
-	for _, unwanted := range []string{
-		"data/images/aaaa.w480.png",
-		"data/images/aaaa.w480.webp",
-		"data/images/aaaa.webp", // the WebP master is generated too
-	} {
-		if _, ok := members[unwanted]; ok {
-			t.Errorf("archive holds a generated file: %s", unwanted)
+	// The images are named, not carried: they live in the pool, shared by
+	// every archive that refers to them.
+	for name := range members {
+		if strings.HasPrefix(name, "data/images/") {
+			t.Errorf("archive carries an image instead of naming it: %s", name)
+		}
+	}
+	man := readManifest(t, filepath.Join(f.backups, info.Name))
+	if got := man.PooledImages(); len(got) != 2 {
+		t.Errorf("manifest names %v, want the two masters", got)
+	}
+	for _, want := range []string{"aaaa.png", "bbbb.jpg"} {
+		if !contains(man.PooledImages(), want) {
+			t.Errorf("manifest does not name %s: %v", want, man.PooledImages())
+		}
+	}
+	for _, unwanted := range []string{"aaaa.w480.png", "aaaa.w480.webp", "aaaa.webp"} {
+		if contains(man.PooledImages(), unwanted) {
+			t.Errorf("manifest names a generated file: %s", unwanted)
+		}
+	}
+	// And the pool holds exactly those.
+	for _, want := range []string{"aaaa.png", "bbbb.jpg"} {
+		if _, err := os.Stat(filepath.Join(f.backups, "images", want)); err != nil {
+			t.Errorf("pool is missing %s: %v", want, err)
 		}
 	}
 	if got := members["data/dtcom.db"]; got != "database v1" {
@@ -371,4 +394,26 @@ func TestArchiveNameRoundTrip(t *testing.T) {
 			t.Errorf("%s parsed as an archive", bad)
 		}
 	}
+}
+
+func contains(in []string, want string) bool {
+	for _, s := range in {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func readManifest(t *testing.T, path string) Manifest {
+	t.Helper()
+	var man Manifest
+	blob := archiveMembers(t, path)[manifestName]
+	if blob == "" {
+		t.Fatalf("%s has no manifest", path)
+	}
+	if err := json.Unmarshal([]byte(blob), &man); err != nil {
+		t.Fatal(err)
+	}
+	return man
 }

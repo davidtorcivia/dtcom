@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
 )
 
 type Destination interface {
@@ -44,8 +46,35 @@ type Destination interface {
 	// List returns the archives it holds, newest first.
 	List() ([]Info, error)
 
+	// --- the image pool ---
+	//
+	// Objects are the shared, immutable images archives refer to rather than
+	// carry. Kept under a prefix so a bucket implementation can use the same
+	// namespace as the archives; see pool.go for what they are for.
+
+	// PutObject stores srcPath under key, and does nothing if the key already
+	// exists — the content is addressed by its own hash, so a key that is
+	// present is by definition already correct.
+	PutObject(key, srcPath string) error
+
+	// GetObject opens one, with its size.
+	GetObject(key string) (io.ReadCloser, int64, error)
+
+	// DeleteObject removes one.
+	DeleteObject(key string) error
+
+	// ListObjects returns everything under a key prefix.
+	ListObjects(prefix string) ([]Object, error)
+
 	// Describe names this destination for the admin page.
 	Describe() string
+}
+
+// Object is one pooled file.
+type Object struct {
+	Name     string
+	Size     int64
+	Modified time.Time
 }
 
 // Local is a directory on the same machine.
@@ -156,6 +185,100 @@ func (l *Local) List() ([]Info, error) {
 		out = append(out, Info{Name: e.Name(), Kind: kind, Created: created, Size: st.Size()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
+	return out, nil
+}
+
+// --- the pool, on disk ---
+
+func (l *Local) objectPath(key string) (string, error) {
+	// Keys are built here, never taken from a request, but they do end up as
+	// paths, so they are checked anyway.
+	clean := filepath.Clean("/" + filepath.ToSlash(key))
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "" || strings.Contains(clean, "..") {
+		return "", fmt.Errorf("invalid object key %q", key)
+	}
+	return filepath.Join(l.Dir, filepath.FromSlash(clean)), nil
+}
+
+func (l *Local) PutObject(key, srcPath string) error {
+	dst, err := l.objectPath(key)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dst); err == nil {
+		// Content-addressed: a key that exists holds the right bytes already.
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	// A hard link costs no space and no time, and is safe because the images it
+	// points at are never rewritten in place — a new picture gets a new name.
+	// It also means the pooled copy survives the original being deleted, which
+	// is the entire point of having it.
+	if err := os.Link(srcPath, dst); err == nil {
+		return nil
+	}
+	// Different filesystem, or a filesystem without links.
+	return copyInto(srcPath, dst)
+}
+
+func (l *Local) GetObject(key string) (io.ReadCloser, int64, error) {
+	p, err := l.objectPath(key)
+	if err != nil {
+		return nil, 0, err
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, 0, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, 0, err
+	}
+	return f, st.Size(), nil
+}
+
+func (l *Local) DeleteObject(key string) error {
+	p, err := l.objectPath(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (l *Local) ListObjects(prefix string) ([]Object, error) {
+	dir, err := l.objectPath(strings.TrimSuffix(prefix, "/"))
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []Object
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		st, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, Object{
+			Name:     strings.TrimSuffix(prefix, "/") + "/" + e.Name(),
+			Size:     st.Size(),
+			Modified: st.ModTime(),
+		})
+	}
 	return out, nil
 }
 

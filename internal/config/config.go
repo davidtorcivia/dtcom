@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,8 +30,15 @@ type Config struct {
 	BackupDir         string
 
 	// BackupInterval is how often a scheduled archive is taken. Zero turns the
-	// schedule off; the admin page can still take one on demand.
+	// schedule off; the admin page can still take one on demand. An archive is
+	// only written when something actually changed, so this is a rate limit
+	// rather than a promise of one a day.
 	BackupInterval time.Duration
+
+	// BackupKeep is how many archives to retain. Counted rather than dated,
+	// because an unchanged site produces no archive: N is the last N states the
+	// site was in, not the last N days.
+	BackupKeep int
 
 	// CookieSecure marks the admin session cookie Secure. Derived from the
 	// BaseURL scheme (https → true) so a local http:// dev run can still log
@@ -99,6 +107,15 @@ func FromEnv() (*Config, error) {
 		return nil, fmt.Errorf("DTCOM_BACKUP_INTERVAL must be 0 or at least 1h (got %s)", backupInterval)
 	}
 
+	backupKeep := 30
+	if v := os.Getenv("DTCOM_BACKUP_KEEP"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("DTCOM_BACKUP_KEEP must be a positive number (got %q)", v)
+		}
+		backupKeep = n
+	}
+
 	baseURL, err := normalizeBaseURL(os.Getenv("DTCOM_BASE_URL"))
 	if err != nil {
 		return nil, err
@@ -135,6 +152,7 @@ func FromEnv() (*Config, error) {
 		// and surviving a drive.
 		BackupDir:         getenvDefault("DTCOM_BACKUP_DIR", dataDir+"/backups"),
 		BackupInterval:    backupInterval,
+		BackupKeep:        backupKeep,
 		CookieSecure:      cookieSecure,
 		TrustProxyHeaders: isTruthy(os.Getenv("DTCOM_TRUST_PROXY")),
 	}, nil

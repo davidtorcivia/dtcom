@@ -24,6 +24,7 @@ services:
       # add a volume for it to fix that. 0 turns the schedule off; /admin/backups
       # can still take one by hand.
       DTCOM_BACKUP_INTERVAL: ${DTCOM_BACKUP_INTERVAL:-24h}
+      DTCOM_BACKUP_KEEP: ${DTCOM_BACKUP_KEEP:-30}
       DTCOM_BACKUP_DIR: ${DTCOM_BACKUP_DIR:-}
       DTCOM_LISTEN_ADDR: ":8080"
       DTCOM_LOG_LEVEL: ${DTCOM_LOG_LEVEL:-info}

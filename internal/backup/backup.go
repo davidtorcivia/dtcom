@@ -25,8 +25,10 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -40,7 +42,10 @@ import (
 
 // manifestVersion is written into every archive. A restore refuses a version it
 // does not understand rather than half-applying it.
-const manifestVersion = 1
+// Version 2 moved the images out of the archive and into a shared pool it names
+// instead, and added the fingerprint. Version 1 archives still restore: they
+// carry their images, and the restore path uses what it finds.
+const manifestVersion = 2
 
 const manifestName = "manifest.json"
 
@@ -68,9 +73,29 @@ type Manifest struct {
 	Created time.Time `json:"created"`
 	Kind    Kind      `json:"kind"`
 	Posts   int       `json:"posts"`
-	Images  int       `json:"images"`
 	DBBytes int64     `json:"db_bytes"`
+
+	// Images is how many masters this archive covers. Version 1 wrote this key
+	// and nothing else about them, so it keeps its meaning — reusing it for the
+	// list below would make every archive written by the previous release
+	// unreadable, which is the one thing a backup format must never do.
+	Images int `json:"images"`
+
+	// ImageFiles names those masters. Version 2 keeps them in the shared pool
+	// rather than inside the tar, so the archive has to say which it needs. A
+	// version 1 archive carries them and leaves this empty.
+	ImageFiles []string `json:"image_files,omitempty"`
+
+	// Fingerprint is what the site looked like when this was taken — the posts,
+	// site.yml, the image names, and the authored rows of the database. Two
+	// archives with the same fingerprint hold the same site, which is how the
+	// next backup knows there is nothing to do.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
+
+// PooledImages is the list of masters this archive expects to find in the pool,
+// which is empty for a version 1 archive because it carries its own.
+func (m Manifest) PooledImages() []string { return m.ImageFiles }
 
 // Info is one archive as the admin page lists it.
 type Info struct {
@@ -83,11 +108,12 @@ type Info struct {
 // Age is how long ago this archive was taken.
 func (i Info) Age() time.Duration { return time.Since(i.Created) }
 
-// DB is the part of the store this package needs: a consistent copy out, and a
-// file swapped in.
+// DB is the part of the store this package needs: a consistent copy out, a
+// file swapped in, and a summary of the parts of it a person changed.
 type DB interface {
 	Snapshot(path string) error
 	ReplaceWith(path string) error
+	ContentFingerprint() (string, error)
 }
 
 // Config is where everything lives.
@@ -143,6 +169,27 @@ func (s *Service) Open(name string) (io.ReadCloser, int64, error) {
 	return s.dest.Get(name)
 }
 
+// Stat finds one archive by name.
+//
+// Worth having as its own call because the download path streams: once a byte
+// has gone out, the status code is spent, so "does this exist and is it one of
+// ours" has to be answered before any header is written.
+func (s *Service) Stat(name string) (Info, error) {
+	if err := validName(name); err != nil {
+		return Info{}, err
+	}
+	list, err := s.dest.List()
+	if err != nil {
+		return Info{}, err
+	}
+	for _, in := range list {
+		if in.Name == name {
+			return in, nil
+		}
+	}
+	return Info{}, fmt.Errorf("no such backup: %s", name)
+}
+
 // Delete removes one archive.
 func (s *Service) Delete(name string) error {
 	if err := validName(name); err != nil {
@@ -153,17 +200,66 @@ func (s *Service) Delete(name string) error {
 	return s.dest.Delete(name)
 }
 
-// Create writes a new archive and returns it. Pruning is the caller's next
-// call, not this one's: taking a copy and throwing copies away are different
-// decisions and a failure in the second should not look like a failure in the
-// first.
+// ErrUnchanged is returned by Create when the site is identical to the newest
+// archive, which is not a failure — it is the answer.
+var ErrUnchanged = errors.New("nothing has changed since the last backup")
+
+// Create writes a new archive and returns it.
+//
+// If the site is byte-for-byte what the newest archive already holds, nothing
+// is written and ErrUnchanged comes back with the archive that already covers
+// it. A copy of a state that is already saved protects nothing and costs a
+// place in the retention count.
+//
+// A pre-restore archive is always written, whatever the fingerprint says: it is
+// taken to make an irreversible thing reversible, and skipping it because
+// "nothing changed" would be trusting the very comparison the restore is about
+// to invalidate.
+//
+// Pruning is the caller's next call, not this one's: taking a copy and throwing
+// copies away are different decisions, and a failure in the second should not
+// look like a failure in the first.
 func (s *Service) Create(kind Kind) (Info, error) {
 	if !kind.valid() {
 		return Info{}, fmt.Errorf("unknown backup kind %q", kind)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if kind != KindPreRestore {
+		same, existing, err := s.unchanged()
+		if err != nil {
+			// Not being able to tell is a reason to take the backup, not to
+			// skip it.
+			slog.Warn("backup change check", "err", err)
+		} else if same {
+			return existing, ErrUnchanged
+		}
+	}
 	return s.create(kind, time.Now().UTC())
+}
+
+// unchanged reports whether the site matches the newest archive's fingerprint.
+func (s *Service) unchanged() (bool, Info, error) {
+	list, err := s.dest.List()
+	if err != nil || len(list) == 0 {
+		return false, Info{}, err
+	}
+	newest := list[0] // List is newest first
+	man, err := s.manifestOf(newest.Name)
+	if err != nil {
+		return false, Info{}, err
+	}
+	if man.Fingerprint == "" {
+		// An archive from before fingerprints existed. Nothing to compare
+		// against, so take a new one — after which there will be.
+		return false, Info{}, nil
+	}
+	now, err := s.fingerprint()
+	if err != nil {
+		return false, Info{}, err
+	}
+	return now == man.Fingerprint, newest, nil
 }
 
 func (s *Service) create(kind Kind, now time.Time) (Info, error) {
@@ -218,6 +314,11 @@ func (s *Service) create(kind Kind, now time.Time) (Info, error) {
 		}
 	}
 	man.Images = len(imageFiles)
+	man.ImageFiles = imageFiles
+	if man.Fingerprint, err = s.fingerprintOf(contentFiles, imageFiles); err != nil {
+		f.Close()
+		return Info{}, err
+	}
 
 	fail := func(err error) (Info, error) {
 		tw.Close()
@@ -239,9 +340,9 @@ func (s *Service) create(kind Kind, now time.Time) (Info, error) {
 	if err := writeTarFile(tw, dbCopy, "data/dtcom.db"); err != nil {
 		return fail(fmt.Errorf("archive database: %w", err))
 	}
-	if err := writeTarTree(tw, s.cfg.ImagesDir, "data/images", imageFiles); err != nil {
-		return fail(fmt.Errorf("archive images: %w", err))
-	}
+	// The images are not written into the tar. They go to the pool, which the
+	// archive names — see pool.go. The download path puts them back on the way
+	// out, so what a person receives is still one complete file.
 
 	if err := tw.Close(); err != nil {
 		return fail(err)
@@ -259,17 +360,49 @@ func (s *Service) create(kind Kind, now time.Time) (Info, error) {
 		return Info{}, err
 	}
 
+	// The images go to the pool before the archive is named, so an archive is
+	// never listed while something it refers to is still missing.
+	for _, rel := range imageFiles {
+		if err := s.putPool(rel, filepath.Join(s.cfg.ImagesDir, filepath.FromSlash(rel))); err != nil {
+			return Info{}, fmt.Errorf("pool %s: %w", rel, err)
+		}
+	}
+
 	// Measured before it is handed over: Put may move the file, and a stat
 	// afterwards would be asking about a name that is no longer there.
 	st, err := os.Stat(tmp)
 	if err != nil {
 		return Info{}, err
 	}
-	name := archiveName(now, kind)
+	// A name is the moment it was taken, to the second, which is readable and
+	// sorts correctly — and collides when two archives are taken inside the
+	// same second. That happens: a restore writes its safety copy and the
+	// operator's manual backup can land in the same tick. Rather than lose one
+	// of them silently to an overwrite, the later one moves forward a second
+	// until its name is free.
+	name, at := s.freeName(now, kind)
 	if err := s.dest.Put(name, tmp); err != nil {
 		return Info{}, err
 	}
-	return Info{Name: name, Kind: kind, Created: now, Size: st.Size()}, nil
+	return Info{Name: name, Kind: kind, Created: at, Size: st.Size()}, nil
+}
+
+func (s *Service) freeName(now time.Time, kind Kind) (string, time.Time) {
+	taken := map[string]bool{}
+	if list, err := s.dest.List(); err == nil {
+		for _, in := range list {
+			taken[in.Name] = true
+		}
+	}
+	at := now
+	for i := 0; i < 120; i++ {
+		name := archiveName(at, kind)
+		if !taken[name] {
+			return name, at
+		}
+		at = at.Add(time.Second)
+	}
+	return archiveName(at, kind), at
 }
 
 // archiveName encodes the moment and the reason, in that order, so a plain

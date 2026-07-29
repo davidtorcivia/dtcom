@@ -156,6 +156,7 @@ func run() error {
 		ImagesDir:  cfg.ImagesDir,
 		DBPath:     cfg.DBPath,
 		Interval:   cfg.BackupInterval,
+		Keep:       backup.Policy{Keep: cfg.BackupKeep, Safety: backup.DefaultPolicy.Safety},
 	}, backup.NewLocal(cfg.BackupDir), st)
 	go backupLoop(ctx, backups)
 
@@ -267,14 +268,19 @@ func backupLoop(ctx context.Context, svc *backup.Service) {
 			slog.Warn("backup schedule", "err", err)
 		} else if due {
 			info, err := svc.Create(backup.KindScheduled)
-			if err != nil {
+			switch {
+			case errors.Is(err, backup.ErrUnchanged):
+				// The site is what the newest archive already holds. Said at
+				// debug level because on a quiet week this is every check.
+				slog.Debug("backup not needed", "unchanged_since", info.Name)
+			case err != nil:
 				slog.Error("scheduled backup failed", "err", err)
-			} else {
+			default:
 				slog.Info("scheduled backup", "name", info.Name, "bytes", info.Size)
-				if removed, err := svc.Prune(); err != nil {
+				if removed, swept, err := svc.Prune(); err != nil {
 					slog.Warn("prune backups", "err", err)
-				} else if len(removed) > 0 {
-					slog.Info("old backups pruned", "count", len(removed), "names", removed)
+				} else if len(removed) > 0 || swept > 0 {
+					slog.Info("old backups pruned", "archives", len(removed), "pooled_images", swept)
 				}
 			}
 		}
