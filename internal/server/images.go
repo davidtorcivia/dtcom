@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -88,26 +90,53 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 	}
 	defer file.Close()
 
-	img, err := build.ProcessImage(file, build.MaxImageDim)
+	raw, err := io.ReadAll(file)
 	if err != nil {
 		return "", err
 	}
+	if len(raw) == 0 {
+		return "", errNoImageField
+	}
 
-	sum := sha256.Sum256(img.Data)
-	name := hex.EncodeToString(sum[:])[:32] + img.Ext
+	var (
+		data   []byte
+		ext    string
+		width  int
+		height int
+	)
+	if isSVG(raw) {
+		// SVG is a drawing the decoder cannot open — it is a document, not a
+		// raster. It is stored as written, having been checked by parsing
+		// rather than by trusting the extension or sniffing a prefix, so a file
+		// that merely looks like SVG cannot be served back as image/svg+xml.
+		//
+		// Being a document is also why it is served under a tightened policy;
+		// see svgPolicy in public.go. There is no resampling to do: the whole
+		// point of the format is that it has no fixed size.
+		data, ext = raw, ".svg"
+	} else {
+		img, procErr := build.ProcessImage(bytes.NewReader(raw), build.MaxImageDim)
+		if procErr != nil {
+			return "", procErr
+		}
+		data, ext, width, height = img.Data, img.Ext, img.Width, img.Height
+	}
+
+	sum := sha256.Sum256(data)
+	name := hex.EncodeToString(sum[:])[:32] + ext
 	if err := os.MkdirAll(d.Cfg.ImagesDir, 0o755); err != nil {
 		return "", err
 	}
 	path := filepath.Join(d.Cfg.ImagesDir, name)
 	// Identical content means an identical name; skip rewriting the file.
 	if _, statErr := os.Stat(path); statErr != nil {
-		if err := writeFileAtomic(path, img.Data); err != nil {
+		if err := writeFileAtomic(path, data); err != nil {
 			return "", err
 		}
 	}
 	if header != nil {
 		slog.Info("image uploaded", "name", name, "original", header.Filename,
-			"bytes", len(img.Data), "width", img.Width, "height", img.Height)
+			"bytes", len(data), "width", width, "height", height)
 	}
 	return "/images/" + name, nil
 }

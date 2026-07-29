@@ -303,6 +303,34 @@ func cacheControl(value string, next http.Handler) http.Handler {
 	})
 }
 
+// svgUploadPolicy is the Content-Security-Policy served with an uploaded SVG.
+//
+// SVG is the one uploadable image format that is really a document: navigate
+// straight to one and the browser parses it, scripts and external references
+// and all. The site-wide policy already forbids inline script, but an upload
+// has no business fetching anything at all, so it gets 'none' across the board
+// with inline styles allowed because hand-authored SVG routinely carries them.
+//
+// This costs nothing when the file is used the normal way. A response CSP
+// applies to a document, and an SVG rendered through <img> is not one — that
+// path also disables scripting outright in every browser.
+const svgUploadPolicy = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+
+// svgPolicy replaces the site-wide policy with the stricter one above when the
+// file being served is an SVG.
+//
+// It has to sit inside securityHeaders, not outside: that middleware writes the
+// general policy on the way in, so only a handler running later can overwrite
+// the header.
+func svgPolicy(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(strings.ToLower(r.URL.Path), ".svg") {
+			w.Header().Set("Content-Security-Policy", svgUploadPolicy)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 const (
 	// Static asset URLs carry a content hash (see internal/assets), so a given
 	// URL's bytes never change and it can be cached indefinitely. An edit

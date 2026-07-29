@@ -16,13 +16,11 @@ import (
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 )
 
-// adminUpload posts a multipart file to an admin route with a valid session.
-func (d *testDeps) adminUpload(t *testing.T, path, field, filename string, body []byte) *httptest.ResponseRecorder {
+// multipartRequest builds a file upload. Shared by the session-authenticated
+// admin route and the bearer-authenticated API one, which differ only in how
+// they prove who is asking.
+func multipartRequest(t *testing.T, path, field, filename string, body []byte) *http.Request {
 	t.Helper()
-	sess := httptest.NewRecorder()
-	if err := d.deps.Auth.SetSession(sess, "admin"); err != nil {
-		t.Fatal(err)
-	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	part, err := mw.CreateFormFile(field, filename)
@@ -38,6 +36,17 @@ func (d *testDeps) adminUpload(t *testing.T, path, field, filename string, body 
 	req := httptest.NewRequest(http.MethodPost, path, &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	return req
+}
+
+// adminUpload posts a multipart file to an admin route with a valid session.
+func (d *testDeps) adminUpload(t *testing.T, path, field, filename string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	sess := httptest.NewRecorder()
+	if err := d.deps.Auth.SetSession(sess, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	req := multipartRequest(t, path, field, filename, body)
 	req.AddCookie(sess.Result().Cookies()[0])
 	rec := httptest.NewRecorder()
 	d.mux.ServeHTTP(rec, req)
