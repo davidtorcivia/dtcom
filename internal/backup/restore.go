@@ -97,6 +97,19 @@ func (s *Service) Restore(name string) (*Result, error) {
 		return nil, fmt.Errorf("%s has no database in it", name)
 	}
 
+	// An archive written since the pool exists names its images instead of
+	// carrying them, so they are fetched here — before anything live is
+	// touched, so a pool missing an image fails while the site is still whole.
+	//
+	// One written by the older format, or one that came back from a download,
+	// has them inside already and needs nothing.
+	stagedImages := filepath.Join(work, "data", "images")
+	if _, err := os.Stat(stagedImages); os.IsNotExist(err) && len(man.PooledImages()) > 0 {
+		if err := s.stagePooledImages(man, stagedImages); err != nil {
+			return nil, fmt.Errorf("fetch the images %s refers to: %w", name, err)
+		}
+	}
+
 	// Everything checks out. Take the copy of the current state before
 	// changing any of it — this is the one that makes the rest reversible.
 	safety, err := s.create(KindPreRestore, time.Now().UTC())

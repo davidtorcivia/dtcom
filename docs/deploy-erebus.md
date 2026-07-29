@@ -201,13 +201,27 @@ Neither of these is in git. Both are irreplaceable.
 
 `/admin/backups` takes an archive of all of it — posts, `site.yml`, a
 consistent snapshot of the database, and the uploaded image masters — daily,
-and on demand. They are written to `data/backups/` and thinned on a rolling
-schedule: everything from the last week, then one a week for a month, then one
-a month for half a year.
+and on demand. They are written to `data/backups/`, and the last 30 are kept
+(`DTCOM_BACKUP_KEEP`).
 
-Image renditions and `public/` are deliberately not in an archive. Both are
-regenerated after a restore, and including them would roughly quadruple the
-size of every one.
+Two things keep that cheap:
+
+- **Nothing is written when nothing changed.** Each archive records a
+  fingerprint of the site — posts and `site.yml` by content, images by name,
+  and the authored rows of the database. View counts are excluded on purpose:
+  they tick up whenever anybody reads the site, and letting them count would
+  mean a fresh archive every night of a site nobody touched.
+- **Images are stored once.** An upload is named after a hash of its own bytes
+  and is never rewritten, so `data/backups/images/` holds one copy and each
+  archive names what it needs. On one filesystem those are hard links to the
+  live images, so the pool costs no space at all — and it still protects them,
+  because the data stays alive as long as either name does.
+
+The result: an archive is a few hundred KB rather than the megabytes of its
+images. Downloading one reassembles the whole thing, images included.
+
+Image renditions and `public/` are in neither place. Both are regenerated after
+a restore, and including them would roughly quadruple every archive.
 
 Restoring is on the same page, behind typing the archive's date. It takes a
 fresh archive of the current state first, so a restore chosen in error is
@@ -229,10 +243,14 @@ Two things this does not do:
 
 Without the admin page — a container that will not start, say:
 
+Download the archive from `/admin/backups` first — the copy on disk names its
+images rather than carrying them, while a downloaded one is complete.
+
 ```bash
 cd /nvme-mirror/apps/dtcom
 docker compose down
-tar xzf data/backups/dtcom-<timestamp>-<kind>.tar.gz -C /tmp/restore
+mkdir -p /tmp/restore
+tar xzf ~/Downloads/dtcom-<timestamp>-<kind>.tar.gz -C /tmp/restore
 cp -a /tmp/restore/content/. content/
 cp -a /tmp/restore/data/images/. data/images/
 cp /tmp/restore/data/dtcom.db data/dtcom.db

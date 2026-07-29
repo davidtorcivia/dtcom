@@ -8,6 +8,8 @@ package store
 // every rebuild.)
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +41,59 @@ func (s *Store) Snapshot(path string) error {
 		return fmt.Errorf("vacuum into %s: %w", path, err)
 	}
 	return nil
+}
+
+// ContentFingerprint summarises the parts of the database a person changed, so
+// a backup can tell whether taking another copy would achieve anything.
+//
+// Deliberately not a digest of the file. View counts tick up whenever anybody
+// reads the site, so a whole-file hash is different every few minutes and would
+// mean every scheduled backup writes another copy of an unchanged site to
+// justify a handful of incremented counters. The counters still travel in every
+// archive that is taken; they are just not a reason to take one.
+//
+// Links and tokens do count: a link added by hand or imported from a feed is
+// authored state that exists nowhere else. The search index is left out because
+// it is derived from the posts, which are fingerprinted from disk.
+func (s *Store) ContentFingerprint() (string, error) {
+	h := sha256.New()
+	rows, err := s.conn().Query(`
+        SELECT label, href, note, source, sort_date, feed_url, created_at
+        FROM links ORDER BY id`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var label, href, note, source, feedURL string
+		var sortDate, createdAt int64
+		if err := rows.Scan(&label, &href, &note, &source, &sortDate, &feedURL, &createdAt); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "link\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00%d\n",
+			label, href, note, source, sortDate, feedURL, createdAt)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	tokens, err := s.conn().Query(`SELECT name, token_hash, created_at, revoked_at FROM api_tokens ORDER BY id`)
+	if err != nil {
+		return "", err
+	}
+	defer tokens.Close()
+	for tokens.Next() {
+		var name, hash string
+		var created, revoked int64
+		if err := tokens.Scan(&name, &hash, &created, &revoked); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "token\x00%s\x00%s\x00%d\x00%d\n", name, hash, created, revoked)
+	}
+	if err := tokens.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func escapeSQLString(s string) string {

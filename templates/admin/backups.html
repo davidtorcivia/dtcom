@@ -18,7 +18,8 @@ machine that could not be worked out again from something else. Neither <code>co
 <div><dt>Written to</dt><dd><code>{{.Destination}}</code></dd></div>
 <div><dt>Schedule</dt><dd>{{.Schedule}}</dd></div>
 <div><dt>Kept</dt><dd>{{.Policy}}</dd></div>
-<div><dt>Using</dt><dd>{{.Total}}</dd></div>
+<div><dt>Archives</dt><dd>{{.Total}}</dd></div>
+<div><dt>Images</dt><dd>{{.Pool}}</dd></div>
 </dl>
 </div>
 </section>
@@ -73,6 +74,14 @@ immediately.</p>
 database, and the uploaded image masters. Not the renditions and not <code>public/</code> — both are
 regenerated after a restore, and keeping them would roughly quadruple every archive to protect files that
 can be made again in seconds.</p>
+<p class="admin-hint">An uploaded picture is named after a hash of its own bytes and is never rewritten, so
+the images are stored once and shared by every archive that refers to them rather than copied into each.
+That is why the sizes in the table are small: they are the posts and the database. A download is assembled
+whole, images and all, because it is the copy that has to survive this machine.</p>
+<p class="admin-hint">An archive is only written when something has actually changed. Backing up a site
+identical to the one already saved would protect nothing and would push a genuinely different state off the
+end of the list. Page views alone do not count as a change; posts, images, <code>site.yml</code>, links and
+tokens do.</p>
 <p class="admin-hint">These are written to the same machine the site runs on, which covers a mistake but not
 a failed disk. Downloading one puts a copy somewhere else, which is the part a backup on the same drive
 cannot do for you.</p>

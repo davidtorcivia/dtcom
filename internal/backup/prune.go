@@ -2,15 +2,18 @@ package backup
 
 // Retention.
 //
-// The naive rule — "keep the last N" — has a failure it cannot see: if
-// something goes wrong quietly, and nightly backups keep being taken, the
-// damage is copied N times and the last good archive falls off the end. What
-// protects against that is keeping copies at spreading intervals, so there is
-// always something from a week ago and something from months ago.
+// Keep the last N archives, and separately the last few taken just before a
+// restore.
 //
-// So: every archive from the last few days, then one per week, then one per
-// month, thinning with age. A grandfather-father-son rotation, which is the
-// oldest idea in backups and still the right one.
+// Counting archives rather than days is the right unit here because an archive
+// is only written when something actually changed — see Service.Create. So N is
+// not "N days of history", it is "the last N states the site was in", and a
+// week where nothing was published costs nothing and pushes nothing out.
+//
+// That is also why the old grandfather-father-son rotation is gone. Thinning
+// with age exists to stop a nightly run of identical copies from pushing the
+// last good one off the end; when identical copies are never written in the
+// first place, there is nothing to thin.
 
 import (
 	"log/slog"
@@ -19,105 +22,50 @@ import (
 
 // Policy is how much history to keep.
 type Policy struct {
-	Days   int // keep every archive from this many days back
-	Weeks  int // then the newest from each of this many ISO weeks
-	Months int // then the newest from each of this many months
-	Least  int // never go below this many archives, whatever the dates say
+	// Keep is how many archives to retain, newest first.
+	Keep int
 
-	// Safety is how many pre-restore archives to keep, newest first. They are
-	// exempt from the date rules — each is the state of the site immediately
-	// before somebody replaced it — but not from counting, or a run of
-	// restores would fill the disk with copies of an afternoon.
+	// Safety is how many pre-restore archives to keep, counted separately.
+	// Each is the state of the site immediately before somebody replaced it —
+	// the moment most worth being able to reach — so they do not compete with
+	// the ordinary ones for places. They are still counted, or a run of
+	// restores would fill the disk with copies of one afternoon.
 	Safety int
 }
 
-// DefaultPolicy keeps roughly a fortnight of detail and half a year of shape.
-// At this site's size — an archive is the posts, the database, and the image
-// masters, so a few megabytes each — that is on the order of a hundred
-// megabytes, which is a fair price for being able to say "put it back the way
-// it was in March".
-var DefaultPolicy = Policy{Days: 7, Weeks: 4, Months: 6, Least: 3, Safety: 3}
+// DefaultPolicy is deliberately generous. Since the images inside an archive
+// are stored once and shared (see pool.go), thirty archives cost about as much
+// as one did before, so there is no reason to be stingy with history.
+var DefaultPolicy = Policy{Keep: 30, Safety: 3}
 
-// selectForRemoval returns the archives that the policy does not keep, given
-// the full list and the current time.
-//
-// Pre-restore archives are held to a count rather than to the dates: each one
-// is the state of the site immediately before somebody replaced it, which is
-// precisely the moment someone might need to reach back to, so age is the wrong
-// way to judge them — but the newest few are the ones anybody would want, and
-// an afternoon of restores should not fill the disk.
-func selectForRemoval(all []Info, now time.Time, p Policy) []Info {
-	if p.Least <= 0 {
-		p.Least = 1
+// selectForRemoval returns the archives the policy does not keep.
+func selectForRemoval(all []Info, p Policy) []Info {
+	if p.Keep <= 0 {
+		p.Keep = 1
 	}
 	if p.Safety <= 0 {
 		p.Safety = 1
 	}
-	// Newest first.
 	sorted := make([]Info, len(all))
 	copy(sorted, all)
 	sortByCreatedDesc(sorted)
 
-	keep := make(map[string]bool, len(sorted))
-	var weeks, months = map[string]bool{}, map[string]bool{}
-	var safety int
-
-	for i, in := range sorted {
-		switch {
-		case i < p.Least:
-			keep[in.Name] = true
-		case in.Kind == KindPreRestore:
-			// Counted newest first, so the ones that survive are the most
-			// recent restores.
-			if safety < p.Safety {
-				safety++
-				keep[in.Name] = true
-			}
-		case now.Sub(in.Created) <= time.Duration(p.Days)*24*time.Hour:
-			keep[in.Name] = true
-		default:
-			y, w := in.Created.ISOWeek()
-			wk := isoKey(y, w)
-			mk := in.Created.Format("2006-01")
-			// The newest archive in a week keeps that week; the newest in a
-			// month keeps that month. Because the list is newest first, the
-			// first one seen for a bucket is the one to keep.
-			if !weeks[wk] && len(weeks) < p.Weeks {
-				weeks[wk] = true
-				keep[in.Name] = true
-			} else if !months[mk] && len(months) < p.Months {
-				months[mk] = true
-				keep[in.Name] = true
-			}
-		}
-		// A kept archive still claims its buckets, so a daily archive from
-		// yesterday does not leave this week unclaimed and cause a second one
-		// to be kept for it.
-		if keep[in.Name] {
-			y, w := in.Created.ISOWeek()
-			weeks[isoKey(y, w)] = true
-			months[in.Created.Format("2006-01")] = true
-		}
-	}
-
+	var ordinary, safety int
 	var drop []Info
 	for _, in := range sorted {
-		if !keep[in.Name] {
+		if in.Kind == KindPreRestore {
+			safety++
+			if safety > p.Safety {
+				drop = append(drop, in)
+			}
+			continue
+		}
+		ordinary++
+		if ordinary > p.Keep {
 			drop = append(drop, in)
 		}
 	}
 	return drop
-}
-
-func isoKey(year, week int) string {
-	return time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Format("2006") + "-W" + pad2(week)
-}
-
-func pad2(n int) string {
-	if n < 10 {
-		return "0" + string(rune('0'+n))
-	}
-	return string(rune('0'+n/10)) + string(rune('0'+n%10))
 }
 
 func sortByCreatedDesc(in []Info) {
@@ -128,21 +76,22 @@ func sortByCreatedDesc(in []Info) {
 	}
 }
 
-// Prune removes the archives the policy no longer keeps, returning their names.
-func (s *Service) Prune() ([]string, error) {
+// Prune removes the archives the policy no longer keeps, then sweeps any
+// pooled image no archive refers to any more. Returns the archive names it
+// removed and how many pooled images went with them.
+func (s *Service) Prune() ([]string, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.prune(time.Now().UTC())
+	return s.prune()
 }
 
-func (s *Service) prune(now time.Time) ([]string, error) {
+func (s *Service) prune() ([]string, int, error) {
 	all, err := s.dest.List()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	drop := selectForRemoval(all, now, s.cfg.Keep)
 	var removed []string
-	for _, in := range drop {
+	for _, in := range selectForRemoval(all, s.cfg.Keep) {
 		if err := s.dest.Delete(in.Name); err != nil {
 			// One that will not delete should not stop the others; a full disk
 			// is exactly when pruning matters.
@@ -151,5 +100,15 @@ func (s *Service) prune(now time.Time) ([]string, error) {
 		}
 		removed = append(removed, in.Name)
 	}
-	return removed, nil
+	swept, err := s.sweepPool()
+	if err != nil {
+		slog.Warn("sweep backup image pool", "err", err)
+	}
+	return removed, swept, nil
 }
+
+// unusedSince is a small grace period on pooled images. An image put in the
+// pool by a backup being written this instant is not yet referenced by any
+// listed archive, and sweeping between those two steps would delete it out
+// from under the archive that is about to name it.
+const unusedSince = 10 * time.Minute

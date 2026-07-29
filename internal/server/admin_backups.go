@@ -5,7 +5,6 @@ package server
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -79,13 +78,15 @@ func (d *Deps) renderBackups(w http.ResponseWriter, r *http.Request, notice, err
 	}
 
 	policy := d.Backups.Policy()
+	pooled, poolBytes := d.Backups.PoolSize()
 	d.adminTmpls.render(w, "backups", d.adminData("Backups", map[string]any{
 		"Backups":     rows,
 		"Total":       humanBytes(total),
 		"Destination": d.Backups.Where(),
 		"Schedule":    humanInterval(d.Backups.Interval()),
-		"Policy": fmt.Sprintf("everything from the last %d days, then one a week for %d weeks, then one a month for %d months",
-			policy.Days, policy.Weeks, policy.Months),
+		"Policy": fmt.Sprintf("the last %d, plus the %d most recent taken before a restore",
+			policy.Keep, policy.Safety),
+		"Pool":   fmt.Sprintf("%d images, %s, shared by every archive", pooled, humanBytes(poolBytes)),
 		"Notice": notice,
 		"Error":  errMsg,
 	}))
@@ -104,16 +105,24 @@ func (d *Deps) adminBackupCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, err := d.Backups.Create(backup.KindManual)
+	if errors.Is(err, backup.ErrUnchanged) {
+		// Not a failure, and worth saying rather than quietly writing a second
+		// copy of a state that is already saved.
+		redirectBackups(w, r, fmt.Sprintf(
+			"Nothing has changed since %s was taken %s, so no new backup was needed.",
+			info.Name, humanAge(info.Age())), "")
+		return
+	}
 	if err != nil {
 		slog.Error("backup failed", "err", err)
 		redirectBackups(w, r, "", "Backup failed: "+err.Error())
 		return
 	}
 	slog.Info("backup taken", "name", info.Name, "bytes", info.Size, "kind", info.Kind)
-	if removed, err := d.Backups.Prune(); err != nil {
+	if removed, swept, err := d.Backups.Prune(); err != nil {
 		slog.Warn("prune after backup", "err", err)
-	} else if len(removed) > 0 {
-		slog.Info("old backups pruned", "count", len(removed))
+	} else if len(removed) > 0 || swept > 0 {
+		slog.Info("old backups pruned", "archives", len(removed), "pooled_images", swept)
 	}
 	redirectBackups(w, r, fmt.Sprintf("Backed up: %s (%s)", info.Name, humanBytes(info.Size)), "")
 }
@@ -124,22 +133,31 @@ func (d *Deps) adminBackupDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	rc, size, err := d.Backups.Open(name)
-	if err != nil {
+
+	// Checked before a single header is written. The response is streamed and
+	// assembled as it goes, so by the time anything could go wrong the status
+	// code has already been sent — "no such backup" has to be answered here or
+	// it comes out as an empty 200.
+	if _, err := d.Backups.Stat(name); err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	defer rc.Close()
 
+	// What is stored holds no images — they are pooled and shared. What is sent
+	// is the complete thing, assembled as it streams, because a download is the
+	// copy that outlives this disk and it cannot depend on a pool left behind
+	// on it. No Content-Length: the size is not known until it has been built,
+	// and a wrong one is worse than none.
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Length", fmt.Sprint(size))
 	// The name is validated as a plain archive name before it gets here, so it
 	// carries no quote or newline to break out of the header with.
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	// A backup is the site's private data; no cache anywhere should hold it.
 	w.Header().Set("Cache-Control", "no-store, private")
-	if _, err := io.Copy(w, rc); err != nil {
-		slog.Warn("backup download interrupted", "name", name, "err", err)
+	if err := d.Backups.Download(name, w); err != nil {
+		// Too late for a status code if bytes are already out; the log is the
+		// only place left to say so, and the truncated file will not restore.
+		slog.Warn("backup download failed", "name", name, "err", err)
 	}
 }
 
