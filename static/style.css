@@ -618,8 +618,10 @@ mark, .highlight {
   justify-content: center;
   overflow: hidden;
   touch-action: none;
-  padding: calc(3.5rem + env(safe-area-inset-top, 0px)) 0
-           calc(4.5rem + env(safe-area-inset-bottom, 0px));
+  /* Only enough inset to clear the close button at the top; the bottom used to
+     reserve a strip for a caption, which the lightbox no longer carries. */
+  padding: calc(3.25rem + env(safe-area-inset-top, 0px)) 0
+           calc(1.25rem + env(safe-area-inset-bottom, 0px));
 }
 
 .lightbox-img {
@@ -645,27 +647,6 @@ mark, .highlight {
 
 .lightbox-img.is-zoomed {
   cursor: grab;
-}
-
-.lightbox-caption {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
-  font-family: var(--font-sans);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1.55;
-  color: #cfcfca;
-  text-align: center;
-  max-width: 58ch;
-  margin: 0 auto;
-  padding: 0 1.25rem;
-  cursor: default;
-  /* The caption sits over the picture when it is tall; keep it readable
-     without drawing a box around it. */
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
-  pointer-events: none;
 }
 
 .lightbox-close {
@@ -708,14 +689,10 @@ mark, .highlight {
 @media (max-width: 640px) {
   /* Edge to edge on a phone: the picture is the point and the margins were
      only ever there to keep it off a desktop's window chrome. */
+  /* Close sits at the bottom on a phone, so the clearance swaps ends. */
   .lightbox-stage {
-    padding: calc(3.25rem + env(safe-area-inset-top, 0px)) 0
-             calc(3.75rem + env(safe-area-inset-bottom, 0px));
-  }
-
-  .lightbox-caption {
-    font-size: 0.75rem;
-    padding: 0 1rem;
+    padding: calc(1rem + env(safe-area-inset-top, 0px)) 0
+             calc(3.5rem + env(safe-area-inset-bottom, 0px));
   }
 
   .lightbox-close {
@@ -725,15 +702,6 @@ mark, .highlight {
     right: auto;
     bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
     left: calc(0.5rem + env(safe-area-inset-left, 0px));
-  }
-
-  /* The caption would collide with the close button down there, so give it
-     room rather than letting the two overlap. */
-  .lightbox-caption {
-    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-    padding-left: 4.5rem;
-    padding-right: 1rem;
-    text-align: left;
   }
 }
 

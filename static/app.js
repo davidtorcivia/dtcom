@@ -125,10 +125,12 @@
     function build() {
       var d = document.createElement('dialog');
       d.className = 'lightbox';
+      // No caption in here on purpose: the caption is on the page, under the
+      // figure, and it has already been read by the time anyone opens this. The
+      // lightbox is for looking at the picture.
       d.innerHTML =
         '<button type="button" class="lightbox-close" aria-label="Close">Close</button>' +
-        '<div class="lightbox-stage"><img class="lightbox-img" alt=""></div>' +
-        '<p class="lightbox-caption"></p>';
+        '<div class="lightbox-stage"><img class="lightbox-img" alt=""></div>';
       document.body.appendChild(d);
 
       d.addEventListener('click', function (e) {
@@ -408,10 +410,9 @@
       }
       var full = box.querySelector('.lightbox-img');
       full.src = img.currentSrc || img.src;
+      // The alt still travels, even though nothing is drawn from it: the
+      // picture in the dialog needs its own description for a screen reader.
       full.alt = img.getAttribute('alt') || '';
-      var caption = box.querySelector('.lightbox-caption');
-      caption.textContent = captionFor(img);
-      caption.hidden = !caption.textContent;
       // Always open at fit, never at whatever magnification the last picture
       // was left on.
       resetView();

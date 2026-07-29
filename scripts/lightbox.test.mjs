@@ -195,13 +195,18 @@ check('one dialog created', dialogs.length, 1);
 const box = dialogs[0];
 check('dialog is in the document', box.parent === body, true);
 check('modal was opened', !!box._modalOpen, true);
-check('caption carried across', box.querySelector('.lightbox-caption').textContent, 'The sRGB transfer function');
 check('image src carried across', box.querySelector('.lightbox-img').src, '/images/x.png');
+// Nothing but the picture: the caption is on the page under the figure, and
+// has already been read by the time anyone opens this.
+check('no caption in the dialog', box.querySelector('.lightbox-caption'), null);
+// The alt still travels even though nothing draws from it — the image in the
+// dialog needs its own description for a screen reader.
+check('alt carried across', box.querySelector('.lightbox-img').alt, 'alt text');
 
 console.log('a second open reuses the same dialog:');
 bareImg.fire('click');
 check('still one dialog', created.filter((e) => e.tagName === 'DIALOG').length, 1);
-check('caption fell back to alt', box.querySelector('.lightbox-caption').textContent, 'just alt');
+check('alt updated for the new image', box.querySelector('.lightbox-img').alt, 'just alt');
 
 console.log('non-zoomable images do not open it:');
 box._modalOpen = false;
