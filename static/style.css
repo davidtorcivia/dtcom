@@ -603,20 +603,55 @@ mark, .highlight {
   background: rgba(8, 9, 11, 0.94);
 }
 
+/* The stage fills what is left between the close button and the caption, and
+   centres the picture in it. Gestures are handled in app.js, so the browser is
+   told to keep its hands off: without touch-action:none a pinch scrolls and
+   zooms the page behind the dialog instead. */
+.lightbox-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  padding: calc(3.5rem + env(safe-area-inset-top, 0px)) 0
+           calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
+
 .lightbox-img {
   display: block;
-  /* Fits the viewport with room for the caption, and never upscales past the
-     file's own resolution — a blown-up 400px chart helps nobody. */
-  max-width: 94vw;
-  max-height: 82vh;
+  /* Fits the stage, and never upscales past the file's own resolution — a
+     blown-up 400px chart helps nobody. Magnification beyond this is the
+     gesture's job, not the layout's. */
+  max-width: 100%;
+  max-height: 100%;
   width: auto;
   height: auto;
-  margin: 6vh auto 0;
   cursor: default;
   background: #fff;
+  /* The transform origin has to be the centre for the pinch maths in app.js,
+     which anchors a point by translating rather than by moving the origin. */
+  transform-origin: center center;
+  will-change: transform;
+  /* Stop the OS offering its own image menu mid-pinch. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.lightbox-img.is-zoomed {
+  cursor: grab;
 }
 
 .lightbox-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
   font-family: var(--font-sans);
   font-size: 0.8125rem;
   font-weight: 500;
@@ -624,15 +659,19 @@ mark, .highlight {
   color: #cfcfca;
   text-align: center;
   max-width: 58ch;
-  margin: 1.1rem auto 0;
-  padding: 0 1rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
   cursor: default;
+  /* The caption sits over the picture when it is tall; keep it readable
+     without drawing a box around it. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
 }
 
 .lightbox-close {
   position: absolute;
-  top: 1.25rem;
-  right: 1.25rem;
+  top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  right: calc(0.75rem + env(safe-area-inset-right, 0px));
   z-index: 1;
   font-family: var(--font-sans);
   font-size: 0.6875rem;
@@ -641,6 +680,9 @@ mark, .highlight {
   letter-spacing: 0.1em;
   color: #cfcfca;
   background: none;
+  /* A 44px target: the smallest thing a thumb should be asked to hit. */
+  min-width: 44px;
+  min-height: 44px;
   padding: 0.5rem 0.75rem;
   cursor: pointer;
 }
@@ -664,10 +706,43 @@ mark, .highlight {
 }
 
 @media (max-width: 640px) {
+  /* Edge to edge on a phone: the picture is the point and the margins were
+     only ever there to keep it off a desktop's window chrome. */
+  .lightbox-stage {
+    padding: calc(3.25rem + env(safe-area-inset-top, 0px)) 0
+             calc(3.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .lightbox-caption {
+    font-size: 0.75rem;
+    padding: 0 1rem;
+  }
+
+  .lightbox-close {
+    /* Bottom-left on a phone, where a thumb actually reaches. Top-right is a
+       stretch on a large handset and sits under the notch on some. */
+    top: auto;
+    right: auto;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    left: calc(0.5rem + env(safe-area-inset-left, 0px));
+  }
+
+  /* The caption would collide with the close button down there, so give it
+     room rather than letting the two overlap. */
+  .lightbox-caption {
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    padding-left: 4.5rem;
+    padding-right: 1rem;
+    text-align: left;
+  }
+}
+
+/* A finger-driven zoom has no cursor to change, so on touch the affordance has
+   to be the picture itself responding instantly. Remove the transform
+   transition there — it fights the gesture, which is already continuous. */
+@media (hover: none) {
   .lightbox-img {
-    max-width: 100vw;
-    max-height: 76vh;
-    margin-top: 9vh;
+    transition: none;
   }
 }
 

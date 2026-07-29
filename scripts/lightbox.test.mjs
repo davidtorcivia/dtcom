@@ -232,5 +232,111 @@ hiddenImg.clientWidth = 1080; // it just became visible
 observers.forEach((o) => o.cb());
 check('newly visible half is now clickable', hiddenImg.classList.contains('is-zoomable'), true);
 
+// --- touch gestures ---------------------------------------------------------
+//
+// A phone shows the image at a fraction of its size, so the zoom is the whole
+// point there. These drive the real pointer handlers.
+
+const stage = box.querySelector('.lightbox-stage');
+const lbImg = box.querySelector('.lightbox-img');
+stage.clientWidth = 400;
+stage.clientHeight = 800;
+stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 800 });
+lbImg.offsetWidth = 400;
+lbImg.offsetHeight = 300;
+
+function scaleOf() {
+  const m = /scale\(([\d.]+)\)/.exec(lbImg.style.transform || '');
+  return m ? Math.round(parseFloat(m[1]) * 100) / 100 : 1;
+}
+function translateOf() {
+  const m = /translate\(([-\d.]+)px,([-\d.]+)px\)/.exec(lbImg.style.transform || '');
+  return m ? [Math.round(+m[1]), Math.round(+m[2])] : [0, 0];
+}
+function pointer(type, id, x, y, kind = 'touch') {
+  stage.fire(type, { pointerId: id, clientX: x, clientY: y, pointerType: kind });
+}
+
+function reopen() {
+  box._modalOpen = false;
+  bigImg.fire('click');
+}
+
+console.log('pinch to zoom:');
+reopen();
+check('opens at fit', scaleOf(), 1);
+pointer('pointerdown', 1, 150, 400);
+pointer('pointerdown', 2, 250, 400);   // 100px apart
+pointer('pointermove', 2, 350, 400);   // now 200px apart -> 2x
+check('pinching out magnifies', scaleOf(), 2);
+pointer('pointermove', 2, 250, 400);   // back to 100px
+check('pinching in returns to fit', scaleOf(), 1);
+pointer('pointerup', 1, 150, 400);
+pointer('pointerup', 2, 250, 400);
+
+console.log('zoom never goes below fit or past the ceiling:');
+reopen();
+pointer('pointerdown', 1, 190, 400);
+pointer('pointerdown', 2, 210, 400);   // 20px apart
+pointer('pointermove', 2, 195, 400);   // squeeze far in
+check('clamped at 1x', scaleOf(), 1);
+pointer('pointermove', 2, 1200, 400);  // yank far out
+check('clamped at the ceiling', scaleOf(), 6);
+pointer('pointerup', 1, 190, 400);
+pointer('pointerup', 2, 1200, 400);
+
+console.log('pan only once zoomed:');
+reopen();
+pointer('pointerdown', 1, 200, 400);
+pointer('pointermove', 1, 260, 400);   // horizontal drag at 1x
+check('no horizontal pan at fit', translateOf()[0], 0);
+pointer('pointerup', 1, 260, 400);
+
+console.log('swipe down dismisses:');
+reopen();
+pointer('pointerdown', 1, 200, 200);
+pointer('pointermove', 1, 200, 260);   // 60px, under the threshold
+check('short drag follows the finger', translateOf()[1], 60);
+pointer('pointerup', 1, 200, 260);
+check('short drag springs back, stays open', [!!box._modalOpen, translateOf()[1]], [true, 0]);
+
+reopen();
+pointer('pointerdown', 1, 200, 200);
+pointer('pointermove', 1, 200, 340);   // 140px, past the threshold
+pointer('pointerup', 1, 200, 340);
+check('long drag closes', !!box._modalOpen, false);
+
+console.log('a mouse drag is not a dismiss gesture:');
+reopen();
+pointer('pointerdown', 1, 200, 200, 'mouse');
+pointer('pointermove', 1, 200, 340, 'mouse');
+pointer('pointerup', 1, 200, 340, 'mouse');
+check('mouse drag left it open', !!box._modalOpen, true);
+
+console.log('double tap toggles:');
+reopen();
+pointer('pointerdown', 1, 200, 400);
+pointer('pointerup', 1, 200, 400);
+pointer('pointerdown', 1, 200, 400);
+pointer('pointerup', 1, 200, 400);
+check('second tap zooms in', scaleOf(), 2.5);
+pointer('pointerdown', 1, 200, 400);
+pointer('pointerup', 1, 200, 400);
+pointer('pointerdown', 1, 200, 400);
+pointer('pointerup', 1, 200, 400);
+check('another double tap returns to fit', scaleOf(), 1);
+
+console.log('reopening always starts at fit:');
+pointer('pointerdown', 1, 150, 400);
+pointer('pointerdown', 2, 250, 400);
+pointer('pointermove', 2, 450, 400);
+check('zoomed before closing', scaleOf() > 1, true);
+pointer('pointerup', 1, 150, 400);
+pointer('pointerup', 2, 450, 400);
+box.close();
+reopen();
+check('reopened at fit', scaleOf(), 1);
+check('and centred', translateOf(), [0, 0]);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

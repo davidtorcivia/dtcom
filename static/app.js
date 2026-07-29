@@ -127,19 +127,255 @@
       d.className = 'lightbox';
       d.innerHTML =
         '<button type="button" class="lightbox-close" aria-label="Close">Close</button>' +
-        '<img class="lightbox-img" alt="">' +
+        '<div class="lightbox-stage"><img class="lightbox-img" alt=""></div>' +
         '<p class="lightbox-caption"></p>';
       document.body.appendChild(d);
 
       d.addEventListener('click', function (e) {
-        // A click on the dialog itself is the backdrop or the padding around
-        // the image. Clicks on the image are left alone so it can be examined
-        // without the thing shutting under the pointer.
-        if (e.target === d || e.target.classList.contains('lightbox-close')) {
+        // A click on the dialog, or on the empty stage around the picture, is
+        // the backdrop. Clicks on the image itself are left alone so it can be
+        // examined without the thing shutting under the pointer.
+        if (e.target === d || e.target.classList.contains('lightbox-close') ||
+            e.target.classList.contains('lightbox-stage')) {
           d.close();
         }
       });
+      d.addEventListener('close', resetView);
+      initGestures(d);
       return d;
+    }
+
+    // --- touch gestures ----------------------------------------------------
+    //
+    // A phone shows the image at a fraction of its size, so "full size" there
+    // means nothing without a way to get closer. Pinch to zoom, double-tap to
+    // toggle, drag to pan once zoomed, and a downward flick to dismiss.
+    //
+    // Written against Pointer Events, which covers touch, pen and mouse in one
+    // path, and with touch-action: none on the stage so the browser stops
+    // trying to scroll and zoom the page underneath us.
+
+    var MAX_SCALE = 6;
+    var DISMISS_AT = 90;   // px of downward drag that closes it
+    var DOUBLE_TAP_MS = 300;
+
+    var view = { scale: 1, tx: 0, ty: 0 };
+    var pointers = null;   // live pointers, by id
+    var pinch = null;      // gesture origin while two fingers are down
+    var drag = null;       // single-pointer pan or dismiss
+    var lastTap = 0;
+    var lastTapX = 0;
+    var lastTapY = 0;
+
+    function imgEl() { return box && box.querySelector('.lightbox-img'); }
+    function stageEl() { return box && box.querySelector('.lightbox-stage'); }
+
+    function applyView(animate) {
+      var img = imgEl();
+      if (!img) {
+        return;
+      }
+      img.style.transition = animate ? 'transform 0.18s ease-out' : '';
+      img.style.transform =
+        'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.scale + ')';
+      // Once magnified the image itself becomes draggable, so the cursor and
+      // the dismiss-on-tap affordance should stop advertising otherwise.
+      img.classList.toggle('is-zoomed', view.scale > 1.01);
+    }
+
+    function resetView() {
+      view.scale = 1;
+      view.tx = 0;
+      view.ty = 0;
+      if (box) {
+        var stage = stageEl();
+        if (stage) {
+          stage.style.opacity = '';
+        }
+      }
+      applyView(false);
+    }
+
+    // clampPan keeps the picture's edges from being dragged inside the frame:
+    // there is nothing behind them, and letting go of the image is disorienting.
+    function clampPan() {
+      var img = imgEl(), stage = stageEl();
+      if (!img || !stage) {
+        return;
+      }
+      var maxX = Math.max(0, (img.offsetWidth * view.scale - stage.clientWidth) / 2);
+      var maxY = Math.max(0, (img.offsetHeight * view.scale - stage.clientHeight) / 2);
+      view.tx = Math.min(maxX, Math.max(-maxX, view.tx));
+      view.ty = Math.min(maxY, Math.max(-maxY, view.ty));
+    }
+
+    // zoomAbout scales while holding one point still, so the picture grows
+    // around the fingers rather than around its own middle.
+    function zoomAbout(nextScale, px, py) {
+      var stage = stageEl();
+      if (!stage) {
+        return;
+      }
+      var r = stage.getBoundingClientRect();
+      var ax = px - r.left - r.width / 2;
+      var ay = py - r.top - r.height / 2;
+      var ratio = nextScale / view.scale;
+      view.tx = ax - (ax - view.tx) * ratio;
+      view.ty = ay - (ay - view.ty) * ratio;
+      view.scale = nextScale;
+      clampPan();
+    }
+
+    function distance(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function pointerList() {
+      var out = [];
+      pointers.forEach(function (p) { out.push(p); });
+      return out;
+    }
+
+    function initGestures(d) {
+      pointers = {};
+      pointers.map = Object.create(null);
+      pointers.forEach = function (fn) {
+        Object.keys(this.map).forEach(function (k) { fn(this.map[k]); }, this);
+      };
+      pointers.set = function (id, p) { this.map[id] = p; };
+      pointers.del = function (id) { delete this.map[id]; };
+      pointers.count = function () { return Object.keys(this.map).length; };
+
+      var stage = d.querySelector('.lightbox-stage');
+
+      stage.addEventListener('pointerdown', function (e) {
+        pointers.set(e.pointerId, { id: e.pointerId, x: e.clientX, y: e.clientY, type: e.pointerType });
+        if (stage.setPointerCapture) {
+          try { stage.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
+        }
+        var n = pointers.count();
+        if (n === 2) {
+          var ps = pointerList();
+          pinch = {
+            dist: distance(ps[0], ps[1]),
+            scale: view.scale,
+            midX: (ps[0].x + ps[1].x) / 2,
+            midY: (ps[0].y + ps[1].y) / 2,
+          };
+          drag = null;
+        } else if (n === 1) {
+          drag = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, type: e.pointerType, moved: 0 };
+        }
+      });
+
+      stage.addEventListener('pointermove', function (e) {
+        var p = pointers.map[e.pointerId];
+        if (!p) {
+          return;
+        }
+        p.x = e.clientX;
+        p.y = e.clientY;
+
+        if (pinch && pointers.count() === 2) {
+          var ps = pointerList();
+          var next = Math.min(MAX_SCALE, Math.max(1, pinch.scale * (distance(ps[0], ps[1]) / pinch.dist)));
+          zoomAbout(next, (ps[0].x + ps[1].x) / 2, (ps[0].y + ps[1].y) / 2);
+          applyView(false);
+          return;
+        }
+        if (!drag) {
+          return;
+        }
+        var dx = e.clientX - drag.x;
+        var dy = e.clientY - drag.y;
+        drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
+
+        if (view.scale > 1.01) {
+          view.tx = drag.tx + dx;
+          view.ty = drag.ty + dy;
+          clampPan();
+          applyView(false);
+          return;
+        }
+        // Not zoomed: a downward drag on touch dismisses, the way a photo
+        // viewer does. The image follows the finger and the stage fades, so the
+        // gesture shows its own progress before it commits to anything.
+        if (drag.type === 'touch' && dy > 0) {
+          view.ty = dy;
+          stage.style.opacity = String(Math.max(0.25, 1 - dy / 400));
+          applyView(false);
+        }
+      });
+
+      function endPointer(e) {
+        var was = pointers.map[e.pointerId];
+        pointers.del(e.pointerId);
+
+        if (pointers.count() < 2) {
+          pinch = null;
+        }
+        if (pointers.count() > 0) {
+          return;
+        }
+
+        // Dismiss if the flick went far enough; otherwise spring back.
+        if (drag && drag.type === 'touch' && view.scale <= 1.01) {
+          if (view.ty > DISMISS_AT) {
+            drag = null;
+            box.close();
+            return;
+          }
+          view.ty = 0;
+          stage.style.opacity = '';
+          applyView(true);
+        }
+        // A pinch that ended below 1x snaps back rather than leaving the
+        // picture stranded small in the middle of a black screen.
+        if (view.scale <= 1.01 && view.scale !== 1) {
+          resetView();
+          applyView(true);
+        }
+
+        // Double-tap toggles between fit and a close-up on the tapped point.
+        // Only when the finger stayed put — a pan should never zoom.
+        if (was && drag && drag.moved < 10) {
+          var now = Date.now();
+          var near = Math.hypot(was.x - lastTapX, was.y - lastTapY) < 40;
+          if (now - lastTap < DOUBLE_TAP_MS && near) {
+            if (view.scale > 1.01) {
+              resetView();
+            } else {
+              zoomAbout(2.5, was.x, was.y);
+            }
+            applyView(true);
+            lastTap = 0;
+          } else {
+            lastTap = now;
+            lastTapX = was.x;
+            lastTapY = was.y;
+          }
+        }
+        drag = null;
+      }
+
+      stage.addEventListener('pointerup', endPointer);
+      stage.addEventListener('pointercancel', endPointer);
+
+      // Desktop: the wheel zooms about the cursor, which is what anyone who has
+      // used a map expects. Passive:false because zooming means not scrolling.
+      stage.addEventListener('wheel', function (e) {
+        if (!box || !box.open) {
+          return;
+        }
+        e.preventDefault();
+        var next = Math.min(MAX_SCALE, Math.max(1, view.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+        zoomAbout(next, e.clientX, e.clientY);
+        if (next === 1) {
+          view.tx = 0;
+          view.ty = 0;
+        }
+        applyView(false);
+      }, { passive: false });
     }
 
     // zoomable reports whether the file has detail the page is not showing.
@@ -176,6 +412,9 @@
       var caption = box.querySelector('.lightbox-caption');
       caption.textContent = captionFor(img);
       caption.hidden = !caption.textContent;
+      // Always open at fit, never at whatever magnification the last picture
+      // was left on.
+      resetView();
       box.showModal();
       box.querySelector('.lightbox-close').focus();
     }
