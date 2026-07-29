@@ -134,9 +134,27 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 			return "", err
 		}
 	}
+	// Renditions are generated now rather than on first request: an upload is
+	// already a slow operation the author is watching, and a page render that
+	// had to wait on image encoding would make every rebuild slow instead. A
+	// failure here is logged and swallowed — the master is stored and serves
+	// fine on its own, and the next startup's backfill will try again.
+	var variants []string
+	if !isSVG(raw) {
+		var vErr error
+		variants, vErr = build.GenerateVariants(d.Cfg.ImagesDir, name)
+		if vErr != nil {
+			slog.Warn("image renditions", "name", name, "err", vErr)
+		}
+		if d.Engine != nil {
+			d.Engine.Images().Refresh()
+		}
+	}
+
 	if header != nil {
 		slog.Info("image uploaded", "name", name, "original", header.Filename,
-			"bytes", len(data), "width", width, "height", height)
+			"bytes", len(data), "width", width, "height", height,
+			"renditions", len(variants))
 	}
 	return "/images/" + name, nil
 }

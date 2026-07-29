@@ -514,6 +514,15 @@ mark, .highlight {
   margin: 2rem auto;
 }
 
+/* An image with WebP renditions is wrapped in <picture>, which is inline by
+   default and would put the block <img> inside an inline box. Making the
+   wrapper the block instead keeps the layout identical to a bare <img> — and
+   is what lets the light/dark rules, which set display on whichever element
+   carries the theme class, give a themed <picture> a box of its own. */
+.article-prose-body picture {
+  display: block;
+}
+
 /* ---------------------------------------------------------------------------
    Figures and captions
 
@@ -634,7 +643,14 @@ mark, .highlight {
   width: auto;
   height: auto;
   cursor: default;
-  background: #fff;
+  /* Figures are drawn on transparent backgrounds, so whatever is behind them
+     here is part of the picture. The page background is the answer: it is what
+     the figure was drawn against, and it follows the theme — which matters,
+     because the dark half of a light/dark pair is pale ink on nothing, and
+     painting it onto white would erase it.
+
+     Opaque photographs cover this entirely and never see it. */
+  background: var(--bg);
   /* The transform origin has to be the centre for the pinch maths in app.js,
      which anchors a point by translating rather than by moving the origin. */
   transform-origin: center center;
@@ -686,6 +702,49 @@ mark, .highlight {
   min-height: 44px;
   padding: 0.5rem 0.75rem;
   cursor: pointer;
+}
+
+/* The lightbox opens on the rendition the page already had, then replaces it
+   with the full-size file. That second load can take a moment on a phone, and
+   a picture that is quietly about to get sharper should say so — otherwise the
+   reader zooms in, finds it soft, and concludes that is all there is.
+
+   Sits opposite the close button, in the same quiet register: this is a note,
+   not a control. */
+.lightbox-loading {
+  position: absolute;
+  top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  left: calc(0.75rem + env(safe-area-inset-left, 0px));
+  z-index: 1;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #8a8a85;
+  pointer-events: none;
+  animation: lightbox-pulse 1.4s ease-in-out infinite;
+}
+
+.lightbox-loading[hidden] {
+  display: none;
+}
+
+@keyframes lightbox-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  /* Close moves to the bottom on a phone; this stays out of its way. */
+  .lightbox-loading {
+    top: auto;
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    right: calc(0.5rem + env(safe-area-inset-right, 0px));
+    left: auto;
+  }
 }
 
 .lightbox-close:hover,

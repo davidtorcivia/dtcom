@@ -93,6 +93,7 @@ func run() error {
 		ContentDir:   cfg.ContentDir,
 		PublicDir:    cfg.PublicDir,
 		StaticDir:    cfg.StaticDir,
+		ImagesDir:    cfg.ImagesDir,
 		Assets:       fingerprints,
 		Site:         siteFn,
 		Store:        st,
@@ -104,6 +105,27 @@ func run() error {
 	if err := engine.Rebuild(); err != nil {
 		return err
 	}
+
+	// Fill in any missing image renditions, in the background: an image
+	// uploaded before this pipeline existed has none, and encoding a directory
+	// of them takes long enough that doing it before the first request would be
+	// a visible outage. Pages rendered in the meantime simply reference the
+	// master, and the rebuild at the end brings them up to date.
+	//
+	// Idempotent, so the usual case — everything already generated — costs one
+	// header read per file and finishes in milliseconds.
+	go func() {
+		wrote, err := engine.Images().Backfill()
+		if err != nil {
+			slog.Warn("image rendition backfill", "err", err)
+		}
+		if wrote > 0 {
+			slog.Info("image renditions generated", "files", wrote)
+			if err := engine.Rebuild(); err != nil {
+				slog.Warn("rebuild after rendition backfill", "err", err)
+			}
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

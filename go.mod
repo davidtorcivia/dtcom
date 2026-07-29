@@ -3,6 +3,7 @@ module davidtorcivia.com/dtcom
 go 1.25.5
 
 require (
+	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/adrg/frontmatter v0.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/fsnotify/fsnotify v1.10.1
