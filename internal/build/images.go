@@ -148,16 +148,19 @@ func hasAlpha(im image.Image) bool {
 	return false
 }
 
-// encodePNG writes a full-colour PNG. The compression level is the encoder's
-// best: these files are written once and served for years, so the trade is
-// entirely in favour of the reader.
+// encodePNG writes a full-colour PNG.
+//
+// At the default compression level, not the encoder's best. Measured on this
+// site's own pictures, "best" produced files 0.5% smaller and took two to
+// three times as long — and that time is spent while an author waits for an
+// upload to come back. Half a per cent is not worth a second of anyone's day.
 //
 // Deliberately never paletted. Quantising to 256 colours would shrink a chart
 // nicely and would also reduce a soft anti-aliased edge over a transparent
 // background to a hard one, which is the visible half of "we broke the
 // transparency".
 func encodePNG(w io.Writer, im image.Image) error {
-	enc := png.Encoder{CompressionLevel: png.BestCompression}
+	enc := png.Encoder{CompressionLevel: png.DefaultCompression}
 	return enc.Encode(w, im)
 }
 

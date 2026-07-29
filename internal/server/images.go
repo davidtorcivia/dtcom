@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"davidtorcivia.com/dtcom/internal/build"
 )
@@ -134,27 +135,53 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 			return "", err
 		}
 	}
-	// Renditions are generated now rather than on first request: an upload is
-	// already a slow operation the author is watching, and a page render that
-	// had to wait on image encoding would make every rebuild slow instead. A
-	// failure here is logged and swallowed — the master is stored and serves
-	// fine on its own, and the next startup's backfill will try again.
-	var variants []string
-	if !isSVG(raw) {
-		var vErr error
-		variants, vErr = build.GenerateVariants(d.Cfg.ImagesDir, name)
-		if vErr != nil {
-			slog.Warn("image renditions", "name", name, "err", vErr)
-		}
-		if d.Engine != nil {
-			d.Engine.Images().Refresh()
-		}
-	}
-
 	if header != nil {
 		slog.Info("image uploaded", "name", name, "original", header.Filename,
-			"bytes", len(data), "width", width, "height", height,
-			"renditions", len(variants))
+			"bytes", len(data), "width", width, "height", height)
+	}
+	if !isSVG(raw) {
+		d.generateRenditions(name)
 	}
 	return "/images/" + name, nil
+}
+
+// renditionWork serializes rendition encoding across uploads. Encoding one
+// image at every width is several seconds of CPU; two at once on a small box
+// would make the site itself slow to answer, and there is nothing to gain from
+// racing them.
+var renditionWork sync.Mutex
+
+// generateRenditions cuts an uploaded image down to the responsive widths, in
+// the background.
+//
+// Off the request on purpose. Doing it inline tripled the time an upload took
+// — ten seconds for a large picture — and that is time the author spends
+// watching a spinner in the editor for work that changes nothing about the
+// answer they are waiting for: the master is already stored and already serves.
+//
+// The rebuild at the end is what puts the renditions into the pages. Until it
+// runs, a post referencing this image simply points at the master, which is
+// correct, just heavier — and if the process dies first, the next startup's
+// backfill finishes the job.
+func (d *Deps) generateRenditions(name string) {
+	go func() {
+		renditionWork.Lock()
+		defer renditionWork.Unlock()
+
+		written, err := build.GenerateVariants(d.Cfg.ImagesDir, name)
+		if err != nil {
+			slog.Warn("image renditions", "name", name, "err", err)
+		}
+		if len(written) == 0 {
+			return
+		}
+		slog.Info("image renditions generated", "name", name, "files", len(written))
+		if d.Engine == nil {
+			return
+		}
+		d.Engine.Images().Refresh()
+		if err := d.Engine.Rebuild(); err != nil {
+			slog.Warn("rebuild after renditions", "name", name, "err", err)
+		}
+	}()
 }
