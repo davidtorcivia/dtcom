@@ -276,18 +276,26 @@
     // not; this only lands once the fingers are off. The two are swapped in a
     // single frame with the transition off, so the picture sharpens in place
     // rather than moving.
+    // nativeScale is the zoom at which every stored pixel lands on a device
+    // pixel: the sharpest the file can ever be shown, and the last point worth
+    // redrawing at. Past it there is nothing left to draw, and the layer only
+    // gets more expensive to hold — which on iOS is how a zoomed image turns
+    // into a blank rectangle.
+    function nativeScale() {
+      if (!base || !base.w) {
+        return 1;
+      }
+      return Math.max(1, base.natW / ((window.devicePixelRatio || 1) * base.w));
+    }
+
     function commitRaster() {
       var img = imgEl();
       if (!img || !base || !box || !box.open) {
         return;
       }
-      // Past one stored pixel per device pixel there is nothing left to draw,
-      // and the layer would only get more expensive to hold — which on iOS is
-      // how a zoomed image turns into a blank rectangle. Beyond that point the
-      // transform can go on stretching; there is no detail being withheld.
-      var dpr = window.devicePixelRatio || 1;
-      var ceiling = Math.max(1, base.natW / (dpr * base.w));
-      var target = Math.min(view.scale, ceiling);
+      // Beyond nativeScale the transform can go on stretching; there is no
+      // detail being withheld.
+      var target = Math.min(view.scale, nativeScale());
       if (Math.abs(target - layoutScale) < 0.02) {
         return;
       }
@@ -518,7 +526,15 @@
             if (view.scale > 1.01) {
               resetView();
             } else {
-              zoomAbout(2.5, was.x, was.y);
+              // Land on the sharpest view the file has in it rather than on a
+              // round number: on a phone that is every one of a 2000px file's
+              // pixels, and the difference between reading a label and
+              // guessing at it. Where that is barely a magnification — a
+              // picture already near its own resolution on screen — a flat
+              // 2.5x is the more useful answer, and no less sharp, since there
+              // is nothing to land on.
+              var native = nativeScale();
+              zoomAbout(native >= 1.5 ? native : 2.5, was.x, was.y);
             }
             applyView(true);
             eased = true;
