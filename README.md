@@ -83,7 +83,7 @@ An image with more resolution than the column shows becomes clickable and opens 
 
 Tag a pair of URLs `#light` and `#dark` and they collapse into a single figure that swaps with the theme. The swap is CSS keyed on `data-theme`, not a `<picture>` element with `prefers-color-scheme`: that media query follows the operating system only, so it would ignore the toggle in the site header. Both files are in the markup and the browser fetches both, which is the cost of honouring a manual toggle.
 
-**Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each upload is re-encoded (which strips EXIF), downscaled to 2000px, and stored under a content-derived name.
+**Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each raster upload is re-encoded (which strips EXIF), downscaled to 2000px, and stored under a content-derived name. SVG is accepted too and stored as written — there is nothing to resample in a vector — after being validated as a real SVG document.
 
 **API / MCP.** See the two sections below. These are the paths an LLM client uses. `/admin/integrations` shows the live token, a ready-to-paste MCP client config, and the full endpoint list.
 
@@ -169,7 +169,8 @@ Worth knowing before this faces the internet:
 - **Headers**: `Content-Security-Policy` with a strict `script-src` (no page executes an inline script), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`. Every source is `'self'` apart from `img-src`, which allows `https:` so posts can reference remote images. Typography is self-hosted from `static/fonts/`, so there are no third-party font hosts to allow.
 - **Markdown** renders with raw HTML enabled, because posts are author-written. Everything downstream treats rendered output as untrusted anyway: the search index strips tags, and search excerpts are escaped before their highlight markers are restored.
 - **Views** store a keyed hash of the client address, not the address. The key is `DTCOM_SESSION_KEY`, so the stored value is meaningless without it.
-- **Uploads** are decoded, dimension-checked against a decompression-bomb limit, and re-encoded, so the served bytes are always a real image in a format we chose.
+- **Raster uploads** are decoded, dimension-checked against a decompression-bomb limit, and re-encoded, so the served bytes are always a real image in a format we chose.
+- **SVG uploads** cannot be re-encoded — an SVG is a document, not a raster — so they are stored as written. Two things bound that. They are validated by parsing rather than by extension or a magic prefix, so a file that merely looks like SVG cannot be stored and later served as `image/svg+xml`. And they are served under their own `Content-Security-Policy` of `default-src 'none'; style-src 'unsafe-inline'; sandbox`, which matters because navigating straight to an SVG makes the browser parse it as a document: the policy leaves it unable to run script or fetch anything. That costs nothing in normal use, since a response CSP does not apply to an SVG drawn through `<img>`, and that path disables scripting outright in every browser anyway.
 
 ## Backup
 
