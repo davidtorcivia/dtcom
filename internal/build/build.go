@@ -22,6 +22,7 @@ type EngineConfig struct {
 	PostsDir     string // defaults to ContentDir+"/posts"
 	PublicDir    string
 	StaticDir    string
+	ImagesDir    string // uploaded images and their renditions
 	Site         func() *siteconfig.Config
 	Store        *store.Store
 	TemplatesDir string
@@ -37,7 +38,14 @@ type Engine struct {
 	mu     sync.Mutex
 	tmpls  templateStore
 	assets *assets.Fingerprinter
+	images *ImageIndex
 }
+
+// Images is the engine's view of the images directory: which renditions exist
+// beside each uploaded picture. The server uses it to backfill after an upload.
+// Nil when the engine was built without an ImagesDir, which is the case in
+// tests that render no images.
+func (e *Engine) Images() *ImageIndex { return e.images }
 
 // NewEngine builds an engine and loads its templates. A template parse error
 // is returned rather than swallowed: every page render would fail on a nil
@@ -51,6 +59,9 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		cfg.Assets = assets.New(cfg.StaticDir)
 	}
 	e := &Engine{cfg: cfg, assets: cfg.Assets}
+	if cfg.ImagesDir != "" {
+		e.images = NewImageIndex(cfg.ImagesDir)
+	}
 	if err := e.tmpls.Load(cfg.TemplatesDir, helperFuncs(e.assets)); err != nil {
 		return nil, fmt.Errorf("load templates from %s: %w", cfg.TemplatesDir, err)
 	}
@@ -70,6 +81,9 @@ func (e *Engine) Rebuild() error {
 	// Static files are bind-mounted in the container, so their hashes are
 	// refreshed alongside the templates.
 	e.assets.Refresh()
+	// Likewise the images: a picture uploaded since the last rebuild has
+	// renditions the previous scan never saw.
+	e.images.Refresh()
 	if err := e.tmpls.Load(e.cfg.TemplatesDir, helperFuncs(e.assets)); err != nil {
 		return fmt.Errorf("load templates: %w", err)
 	}
@@ -208,7 +222,10 @@ func (e *Engine) renderPage(name, outPath string, data any, written *pathSet) er
 }
 
 func (e *Engine) renderArticle(a Article, written *pathSet) error {
-	htmlBody, err := markdown.Render(a.Body)
+	// RenderWith, not Render: the resolver is what turns each local image into
+	// a set of renditions the browser can choose from. With no images directory
+	// configured it is nil and every tag is left as written.
+	htmlBody, err := markdown.RenderWith(a.Body, e.images.Resolve)
 	if err != nil {
 		return err
 	}

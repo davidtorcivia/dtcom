@@ -104,9 +104,15 @@
 
   // === Lightbox ===
   //
-  // Post images are stored at up to 2000px but the reading column is ~1080px,
-  // so most of them are being shown smaller than they are. Clicking opens the
-  // full-size file.
+  // What a page shows is a rendition: the server cuts every stored picture down
+  // to a set of widths and the browser takes the one that fits the column, so
+  // on a phone the visible copy can be a fifth of the real thing. Clicking
+  // opens the master.
+  //
+  // That makes the master's dimensions, not the visible copy's, the number
+  // every decision here turns on — how far a zoom can go, whether there is
+  // anything to zoom into at all. They arrive in the markup as data-full-w, so
+  // they are known before a byte of the master has been fetched.
   //
   // Only images that actually have more to show become clickable. Offering a
   // zoom on a picture already at its natural size is a promise the lightbox
@@ -130,6 +136,7 @@
       // lightbox is for looking at the picture.
       d.innerHTML =
         '<button type="button" class="lightbox-close" aria-label="Close">Close</button>' +
+        '<p class="lightbox-loading" role="status" aria-live="polite" hidden>Loading full size</p>' +
         '<div class="lightbox-stage"><img class="lightbox-img" alt=""></div>';
       document.body.appendChild(d);
 
@@ -142,12 +149,13 @@
           d.close();
         }
       });
-      // The fit size is measured from the file's own dimensions, which are not
-      // known until it has decoded. A picture already in the page's cache is
-      // usually decoded before the dialog opens; this covers the case where it
-      // is not.
+      // A fallback for pictures the server could not measure for us — a remote
+      // image, or the admin preview, where there is no data-full-w to read. The
+      // guard on base matters: a load also fires when the full-size file
+      // arrives and replaces what is on screen, and re-measuring there would
+      // throw away the zoom the reader is in the middle of.
       d.querySelector('.lightbox-img').addEventListener('load', function () {
-        if (d.open && measure()) {
+        if (d.open && !base && measure()) {
           applyView(false);
         }
       });
@@ -165,6 +173,10 @@
         }
         base = null;
         layoutScale = 1;
+        // Invalidate any full-size file still in flight, so it cannot arrive
+        // and paint itself over whatever is opened next.
+        openToken++;
+        showLoading(false);
       });
       initGestures(d);
       return d;
@@ -191,6 +203,15 @@
     var view = { scale: 1, tx: 0, ty: 0 };
     // base is the fit geometry in CSS pixels, plus the file's own dimensions.
     var base = null;
+    // master describes the full-size file behind the picture on the page: what
+    // the page shows is a rendition cut down to the width of the column, and
+    // zooming into that would be zooming into a thumbnail. Its dimensions are
+    // known from the markup before a byte of it has been fetched, which is what
+    // lets the zoom be scaled to the real thing from the moment it opens.
+    var master = null;
+    // Bumped on every open and close, so a full-size file that arrives late
+    // can tell it is no longer wanted.
+    var openToken = 0;
     // layoutScale is how much of view.scale has been baked into the element's
     // width and height; the rest is left to the transform. See commitRaster.
     var layoutScale = 1;
@@ -214,7 +235,16 @@
     // ask for a bigger one.
     function measure() {
       var img = imgEl(), stage = stageEl();
-      if (!img || !stage || !img.naturalWidth || !img.naturalHeight) {
+      if (!img || !stage) {
+        return false;
+      }
+      // The full-size file's dimensions, not the rendition's. They are the same
+      // shape, so the fit is unaffected, but everything about how far the zoom
+      // can go depends on which one it is — and the rendition on screen may be
+      // a fifth of the real width.
+      var natW = (master && master.w) || img.naturalWidth;
+      var natH = (master && master.h) || img.naturalHeight;
+      if (!natW || !natH) {
         return false;
       }
       var cs = window.getComputedStyle(stage);
@@ -227,12 +257,12 @@
       }
       // Fit, and never upscale past the file's own resolution: the same rule
       // the stylesheet used to apply, now with the numbers in hand.
-      var fit = Math.min(availW / img.naturalWidth, availH / img.naturalHeight, 1);
+      var fit = Math.min(availW / natW, availH / natH, 1);
       base = {
-        w: img.naturalWidth * fit,
-        h: img.naturalHeight * fit,
-        natW: img.naturalWidth,
-        natH: img.naturalHeight,
+        w: natW * fit,
+        h: natH * fit,
+        natW: natW,
+        natH: natH,
         // The frame the picture is centred in is the stage's content box, not
         // its padding box, and the padding is not symmetrical — the close
         // button gets a strip at one end. Panning is bounded against the same
@@ -308,6 +338,82 @@
     function scheduleCommit(delay) {
       clearTimeout(commitTimer);
       commitTimer = setTimeout(commitRaster, delay === undefined ? COMMIT_MS : delay);
+    }
+
+    // --- the full-size file -------------------------------------------------
+    //
+    // The lightbox opens on whatever the page already has: that file is decoded
+    // and in memory, so the picture is on screen in the same frame as the
+    // dialog. It is also a rendition — as narrow as 480px on a phone — so the
+    // full-size master is fetched straight afterwards and swapped in when it is
+    // ready, by which time the reader has usually not started zooming.
+    //
+    // Fetched through a detached Image so the swap happens from cache, with no
+    // moment where the element has a src it has not decoded and paints white.
+
+    function showLoading(on) {
+      if (!box) {
+        return;
+      }
+      var el = box.querySelector('.lightbox-loading');
+      if (el) {
+        el.hidden = !on;
+      }
+    }
+
+    // fetchMaster loads one candidate and, if the browser cannot decode it,
+    // falls back to the next. The WebP master is offered first where there is
+    // one — it is the same pixels in fewer bytes — and a browser too old to
+    // read WebP simply fails to decode it and gets the PNG.
+    //
+    // That failure is the whole feature detection. Probing for WebP support
+    // costs a request or a canvas trick that gives the wrong answer on the
+    // Safari versions that read the format but cannot write it; letting the
+    // load itself answer is both cheaper and exactly right.
+    function fetchMaster(candidates, token) {
+      if (!candidates.length) {
+        showLoading(false);
+        return;
+      }
+      var url = candidates[0];
+      var pre = new Image();
+      // The picture is already readable at rendition quality, so this must not
+      // compete with anything the page is still doing.
+      pre.fetchPriority = 'low';
+      pre.decoding = 'async';
+      pre.onload = function () {
+        // Gone, or superseded by another picture, while this was in flight.
+        if (token !== openToken || !box || !box.open) {
+          return;
+        }
+        var img = imgEl();
+        if (img) {
+          // No geometry is touched: the element keeps the explicit size the
+          // zoom gave it, and only the pixels behind it get better. Which is
+          // the whole trick — the swap is invisible except for the sharpening.
+          img.src = url;
+        }
+        showLoading(false);
+      };
+      pre.onerror = function () {
+        if (token === openToken) {
+          fetchMaster(candidates.slice(1), token);
+        }
+      };
+      pre.src = url;
+    }
+
+    function loadMaster() {
+      if (!master || !master.url) {
+        return;
+      }
+      var candidates = [];
+      if (master.webp) {
+        candidates.push(master.webp);
+      }
+      candidates.push(master.url);
+      showLoading(true);
+      fetchMaster(candidates, openToken);
     }
 
     function applyView(animate) {
@@ -574,16 +680,45 @@
       }, { passive: false });
     }
 
+    // masterOf reads the full-size file the server recorded beside the page's
+    // rendition. Absent for a remote image or an SVG, in which case what is on
+    // the page is all there is.
+    //
+    // The WebP master is preferred when the page itself is showing WebP, which
+    // is proof enough that this browser reads the format — no probing, no
+    // canvas trick, just the evidence already on screen.
+    function masterOf(img) {
+      var url = img.getAttribute('data-full');
+      if (!url) {
+        return null;
+      }
+      return {
+        url: url,
+        webp: img.getAttribute('data-full-webp') || '',
+        w: parseInt(img.getAttribute('data-full-w'), 10) || 0,
+        h: parseInt(img.getAttribute('data-full-h'), 10) || 0,
+      };
+    }
+
     // zoomable reports whether the file has detail the page is not showing.
     // A hidden image — the unused half of a light/dark pair — has no layout
     // width at all, so it is skipped rather than counted as infinitely zoomable.
     function zoomable(img) {
-      if (!img.naturalWidth || !img.clientWidth) {
+      if (!img.clientWidth) {
+        return false;
+      }
+      // The comparison is against the full-size file, not the rendition on the
+      // page. A phone is sent a 480px-wide copy of a 2560px picture: measured
+      // by what it has decoded, that copy fits the column exactly and looks
+      // like it has nothing more to show, which is the opposite of the truth.
+      var m = masterOf(img);
+      var width = (m && m.w) || img.naturalWidth;
+      if (!width) {
         return false;
       }
       // A couple of pixels of slack: layout rounding should not make an image
       // that exactly fits look like it has more to give.
-      return img.naturalWidth > img.clientWidth + 2;
+      return width > img.clientWidth + 2;
     }
 
     function captionFor(img) {
@@ -607,13 +742,16 @@
       // and zoomed to says nothing about this one.
       base = null;
       layoutScale = 1;
+      openToken++;
       full.classList.remove('is-measured', 'is-zoomed', 'is-gesturing');
       full.style.width = '';
       full.style.height = '';
-      // currentSrc is the file the page actually loaded, which is the full
-      // stored image: nothing here serves a scaled-down variant, so this is
-      // every pixel there is of it.
-      full.src = img.currentSrc || img.src;
+      master = masterOf(img);
+      // Opens on the rendition the page already has. It is decoded and in
+      // memory, so the picture is there in the frame the dialog appears in,
+      // rather than after a request. loadMaster replaces it below.
+      var shown = img.currentSrc || img.src;
+      full.src = shown;
       // The alt still travels, even though nothing is drawn from it: the
       // picture in the dialog needs its own description for a screen reader.
       full.alt = img.getAttribute('alt') || '';
@@ -622,10 +760,17 @@
       resetView();
       box.showModal();
       // Measured after showModal, since a closed dialog's stage has no size to
-      // fit against. A picture that has not decoded yet is measured by the load
-      // handler in build() instead.
-      if (full.complete && full.naturalWidth && measure()) {
+      // fit against. With a master recorded this needs nothing to have loaded —
+      // its dimensions came from the markup. Without one, the load handler in
+      // build() measures whenever the file finishes decoding.
+      if (measure()) {
         applyView(false);
+      }
+      // Nothing to fetch when the page was already showing the full-size file,
+      // which is the case for a picture small enough to have no renditions.
+      if (master && master.url && shown.indexOf(master.url) < 0 &&
+          (!master.webp || shown.indexOf(master.webp) < 0)) {
+        loadMaster();
       }
       box.querySelector('.lightbox-close').focus();
     }
@@ -656,9 +801,14 @@
     }
 
     imgs.forEach(function (img) {
-      if (img.complete) {
-        mark(img);
-      } else {
+      // Marked straight away, not on load. Most pictures on a page are below
+      // the fold and load lazily, and their full size is known from the markup
+      // long before any of their bytes arrive — waiting would leave them
+      // looking un-openable until the reader happened to scroll past them.
+      mark(img);
+      if (!img.complete) {
+        // Still worth repeating on load, for the images with no recorded size,
+        // where the answer genuinely is not known until then.
         img.addEventListener('load', function () { mark(img); });
       }
       img.addEventListener('click', function () {

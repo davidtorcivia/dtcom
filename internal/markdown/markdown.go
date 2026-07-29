@@ -69,8 +69,16 @@ func HasMath(renderedHTML string) bool {
 	return strings.Contains(renderedHTML, `class="math`)
 }
 
-// Render converts markdown source to an HTML fragment.
+// Render converts markdown source to an HTML fragment, leaving image tags as
+// the author wrote them. Used where there is no images directory to consult —
+// the admin's live preview, and tests.
 func Render(src string) (string, error) {
+	return RenderWith(src, nil)
+}
+
+// RenderWith renders and additionally rewrites each local image into its
+// responsive form. See responsive.go.
+func RenderWith(src string, images ImageResolver) (string, error) {
 	// Line endings are normalised here rather than at the call sites. A browser
 	// submits textarea content with CRLF, files on disk use LF, and the save
 	// path already converted — but the admin preview did not, so it rendered
@@ -98,6 +106,9 @@ func Render(src string) (string, error) {
 	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
 	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
 	out = captionImages(out)
+	// After captionImages, never before: figure detection matches paragraphs
+	// made only of <img> tags, and this pass may wrap them in <picture>.
+	out = applyResponsive(out, images)
 	return out, nil
 }
 
