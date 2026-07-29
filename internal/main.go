@@ -15,6 +15,7 @@ import (
 
 	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
+	"davidtorcivia.com/dtcom/internal/backup"
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
 	"davidtorcivia.com/dtcom/internal/feeds"
@@ -148,6 +149,16 @@ func run() error {
 	// startup doesn't block serving.
 	go poller.Poll(ctx, siteFn())
 
+	// backups — content/ and data/ are in no other copy on this machine, by
+	// design (see .gitignore). This is the other copy.
+	backups := backup.New(backup.Config{
+		ContentDir: cfg.ContentDir,
+		ImagesDir:  cfg.ImagesDir,
+		DBPath:     cfg.DBPath,
+		Interval:   cfg.BackupInterval,
+	}, backup.NewLocal(cfg.BackupDir), st)
+	go backupLoop(ctx, backups)
+
 	// watcher — debounce + rebuild on content changes
 	watchEvents := make(chan string, 64)
 	w, err := watcher.Watch(cfg.ContentDir, watchEvents)
@@ -181,11 +192,12 @@ func run() error {
 			sitePtr.Store(s)
 			return nil
 		},
-		Store:  st,
-		Engine: engine,
-		Poller: poller,
-		Auth:   a,
-		Assets: fingerprints,
+		Store:   st,
+		Engine:  engine,
+		Poller:  poller,
+		Backups: backups,
+		Auth:    a,
+		Assets:  fingerprints,
 	})
 
 	srv := &http.Server{
@@ -233,6 +245,63 @@ func run() error {
 // watchLoop coalesces filesystem events and rebuilds once the burst settles.
 // The timer is only armed while there is pending work, so an idle site does no
 // periodic wakeups at all.
+// backupLoop takes a scheduled archive whenever the newest one is older than
+// the configured interval, then prunes to the retention policy.
+//
+// Driven by the age of the last archive rather than by a wall-clock hour, which
+// is what makes it survive restarts: a machine that is rebooted every evening
+// at a fixed time would, on a cron-style schedule, never reach the hour its
+// backup was due. Here, coming up to find the last one a day old is enough.
+func backupLoop(ctx context.Context, svc *backup.Service) {
+	if svc.Interval() <= 0 {
+		slog.Info("scheduled backups disabled")
+		return
+	}
+	// Checked far more often than the interval, so the first archive after a
+	// long downtime is taken promptly rather than a full period late.
+	const check = 15 * time.Minute
+	t := time.NewTicker(check)
+	defer t.Stop()
+	for {
+		if due, err := backupDue(svc); err != nil {
+			slog.Warn("backup schedule", "err", err)
+		} else if due {
+			info, err := svc.Create(backup.KindScheduled)
+			if err != nil {
+				slog.Error("scheduled backup failed", "err", err)
+			} else {
+				slog.Info("scheduled backup", "name", info.Name, "bytes", info.Size)
+				if removed, err := svc.Prune(); err != nil {
+					slog.Warn("prune backups", "err", err)
+				} else if len(removed) > 0 {
+					slog.Info("old backups pruned", "count", len(removed), "names", removed)
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func backupDue(svc *backup.Service) (bool, error) {
+	list, err := svc.List()
+	if err != nil {
+		return false, err
+	}
+	for _, in := range list {
+		// A restore's safety copy is not the scheduled one, but it is a
+		// complete archive taken at a known moment, so it counts as one for the
+		// purpose of "how long since everything was last saved".
+		if time.Since(in.Created) < svc.Interval() {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) {
 	timer := time.NewTimer(rebuildDebounce)
 	if !timer.Stop() {

@@ -26,6 +26,11 @@ type Config struct {
 	SiteYAMLPath      string
 	DBPath            string
 	ImagesDir         string
+	BackupDir         string
+
+	// BackupInterval is how often a scheduled archive is taken. Zero turns the
+	// schedule off; the admin page can still take one on demand.
+	BackupInterval time.Duration
 
 	// CookieSecure marks the admin session cookie Secure. Derived from the
 	// BaseURL scheme (https → true) so a local http:// dev run can still log
@@ -83,6 +88,17 @@ func FromEnv() (*Config, error) {
 		return nil, fmt.Errorf("DTCOM_RSS_INTERVAL must be at least 1m (got %s)", interval)
 	}
 
+	// Backups run daily by default. Set DTCOM_BACKUP_INTERVAL=0 to take them
+	// only by hand — which is a choice worth making deliberately, since
+	// content/ and data/ are in no other copy on this machine.
+	backupInterval, err := time.ParseDuration(getenvDefault("DTCOM_BACKUP_INTERVAL", "24h"))
+	if err != nil {
+		return nil, fmt.Errorf("parse DTCOM_BACKUP_INTERVAL: %w", err)
+	}
+	if backupInterval != 0 && backupInterval < time.Hour {
+		return nil, fmt.Errorf("DTCOM_BACKUP_INTERVAL must be 0 or at least 1h (got %s)", backupInterval)
+	}
+
 	baseURL, err := normalizeBaseURL(os.Getenv("DTCOM_BASE_URL"))
 	if err != nil {
 		return nil, err
@@ -113,6 +129,12 @@ func FromEnv() (*Config, error) {
 		SiteYAMLPath:      contentDir + "/site.yml",
 		DBPath:            dataDir + "/dtcom.db",
 		ImagesDir:         dataDir + "/images",
+		// Alongside the data by default. Point DTCOM_BACKUP_DIR at another
+		// mount to put the archives on a different disk from the thing they
+		// are archiving, which is the difference between surviving a mistake
+		// and surviving a drive.
+		BackupDir:         getenvDefault("DTCOM_BACKUP_DIR", dataDir+"/backups"),
+		BackupInterval:    backupInterval,
 		CookieSecure:      cookieSecure,
 		TrustProxyHeaders: isTruthy(os.Getenv("DTCOM_TRUST_PROXY")),
 	}, nil

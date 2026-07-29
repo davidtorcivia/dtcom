@@ -20,7 +20,7 @@ type IndexedArticle struct {
 
 // ReindexArticles replaces the entire article index.
 func (s *Store) ReindexArticles(arts []IndexedArticle) error {
-	tx, err := s.db.Begin()
+	tx, err := s.conn().Begin()
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func (s *Store) SearchArticles(query string, limit int) ([]SearchHit, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.db.Query(
+	rows, err := s.conn().Query(
 		`SELECT slug, title, description, snippet(articles_fts, 2, ?, ?, '…', 24)
 		 FROM articles_fts WHERE articles_fts MATCH ?
 		 ORDER BY rank LIMIT ?`,

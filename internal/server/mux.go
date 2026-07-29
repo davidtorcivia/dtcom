@@ -12,6 +12,7 @@ import (
 
 	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
+	"davidtorcivia.com/dtcom/internal/backup"
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
 	"davidtorcivia.com/dtcom/internal/feeds"
@@ -36,6 +37,7 @@ type Deps struct {
 	Store      *store.Store
 	Engine     *build.Engine
 	Poller     *feeds.Poller
+	Backups    *backup.Service
 	Auth       *auth.Auth
 	adminTmpls *adminTemplateStore
 	limits     *limiters

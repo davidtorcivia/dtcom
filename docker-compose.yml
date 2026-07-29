@@ -19,6 +19,12 @@ services:
       DTCOM_SESSION_KEY: ${DTCOM_SESSION_KEY}
       DTCOM_API_TOKEN: ${DTCOM_API_TOKEN}
       DTCOM_RSS_INTERVAL: ${DTCOM_RSS_INTERVAL:-30m}
+      # Backups land in the data volume by default, which survives a mistake
+      # but not the disk under it. Point DTCOM_BACKUP_DIR at another mount and
+      # add a volume for it to fix that. 0 turns the schedule off; /admin/backups
+      # can still take one by hand.
+      DTCOM_BACKUP_INTERVAL: ${DTCOM_BACKUP_INTERVAL:-24h}
+      DTCOM_BACKUP_DIR: ${DTCOM_BACKUP_DIR:-}
       DTCOM_LISTEN_ADDR: ":8080"
       DTCOM_LOG_LEVEL: ${DTCOM_LOG_LEVEL:-info}
       # Behind a proxy the real client address arrives in a header. Leave this

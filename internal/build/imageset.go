@@ -69,6 +69,26 @@ func masterName(name string) (base, ext string, ok bool) {
 	return base, ext, true
 }
 
+// IsMasterImage reports whether a file in the images directory is something
+// that was uploaded, as opposed to something generated from it.
+//
+// The distinction is what a backup turns on: masters cannot be reconstructed,
+// renditions are remade from them by GenerateVariants in a few seconds. An SVG
+// counts as a master — it is stored exactly as it arrived and has no
+// renditions. A WebP never does: nothing uploads one, since ProcessImage
+// stores every upload as PNG or JPEG, so a .webp in that directory is always
+// something this package produced.
+func IsMasterImage(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return false
+	}
+	if strings.EqualFold(filepath.Ext(name), ".svg") {
+		return true
+	}
+	_, _, ok := masterName(name)
+	return ok
+}
+
 // GenerateVariants writes any renditions of one master that are not on disk
 // yet, and returns the names it wrote.
 //

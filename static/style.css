@@ -1468,6 +1468,14 @@ footer.site-footer {
     gap: 0.75rem;
     font-size: 0.75rem;
     flex-wrap: wrap;
+    /* The flex-shrink: 0 above is what keeps the nav from being squashed on a
+       desktop, where there is room for it. On a phone it is also what stopped
+       the wrap beside it from ever happening: an item that cannot narrow never
+       reaches the width at which its own children need a second line, so the
+       nav simply grew past the screen and took the page's width with it. */
+    flex-shrink: 1;
+    min-width: 0;
+    justify-content: flex-end;
   }
 
   .article-title-text {
