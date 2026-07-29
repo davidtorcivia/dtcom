@@ -562,6 +562,116 @@ mark, .highlight {
 }
 
 /* ---------------------------------------------------------------------------
+   Lightbox
+
+   Only images with more detail than the column is showing get the affordance —
+   app.js adds .is-zoomable after measuring. The overlay itself is a <dialog>,
+   so Escape and the backdrop are the browser's job rather than ours.
+   -------------------------------------------------------------------------- */
+.article-prose-body img.is-zoomable {
+  cursor: zoom-in;
+}
+
+/* The reset strips outlines globally; a keyboard user tabbing to a zoomable
+   image needs to see where they are. */
+.article-prose-body img.is-zoomable:focus-visible {
+  outline: 3px solid var(--accent-yellow);
+  outline-offset: 3px;
+}
+
+.lightbox {
+  /* The browser centres a modal <dialog> for us; these override the UA's own
+     narrow max-width and its border, which the reset does not reach because
+     the element is created at runtime. */
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none !important;
+  overflow: hidden;
+  /* The whole surface is the dismiss target, so say so. */
+  cursor: zoom-out;
+}
+
+.lightbox::backdrop {
+  /* Near-opaque rather than a light scrim: the point is to look at the picture,
+     and a half-lit page behind it competes. Same value in both themes — a
+     lightbox is its own dark room. */
+  background: rgba(8, 9, 11, 0.94);
+}
+
+.lightbox-img {
+  display: block;
+  /* Fits the viewport with room for the caption, and never upscales past the
+     file's own resolution — a blown-up 400px chart helps nobody. */
+  max-width: 94vw;
+  max-height: 82vh;
+  width: auto;
+  height: auto;
+  margin: 6vh auto 0;
+  cursor: default;
+  background: #fff;
+}
+
+.lightbox-caption {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.55;
+  color: #cfcfca;
+  text-align: center;
+  max-width: 58ch;
+  margin: 1.1rem auto 0;
+  padding: 0 1rem;
+  cursor: default;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 1;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #cfcfca;
+  background: none;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+
+.lightbox-close:hover,
+.lightbox-close:focus-visible {
+  background: var(--accent-yellow);
+  color: #111111;
+}
+
+/* A short fade so the overlay arrives rather than snapping. The reduced-motion
+   block near the top of this file already zeroes every animation, so this
+   respects that preference without repeating itself. */
+.lightbox[open] {
+  animation: lightbox-in 0.16s ease-out;
+}
+
+@keyframes lightbox-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .lightbox-img {
+    max-width: 100vw;
+    max-height: 76vh;
+    margin-top: 9vh;
+  }
+}
+
+/* ---------------------------------------------------------------------------
    Theme-swapped figures
 
    An image tagged #light or #dark in its URL is shown only under that theme.

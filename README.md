@@ -79,6 +79,8 @@ Beyond GFM, a post body gets footnotes (`[^1]`), `==highlight==`, syntax-highlig
 
 An image alone in its paragraph becomes a `<figure>` and its alt text becomes the visible caption — markdown has no caption syntax, and alt is the one place a description already belongs. An image used mid-sentence is left as prose.
 
+An image with more resolution than the column shows becomes clickable and opens full size in a lightbox — measured per image, so one that already fits gets no misleading zoom cursor. It is a `<dialog>`, so Escape and the backdrop are the browser's job.
+
 Tag a pair of URLs `#light` and `#dark` and they collapse into a single figure that swaps with the theme. The swap is CSS keyed on `data-theme`, not a `<picture>` element with `prefers-color-scheme`: that media query follows the operating system only, so it would ignore the toggle in the site header. Both files are in the markup and the browser fetches both, which is the cost of honouring a manual toggle.
 
 **Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each upload is re-encoded (which strips EXIF), downscaled to 2000px, and stored under a content-derived name.
@@ -186,7 +188,8 @@ A fresh clone therefore has no content at all. The binary seeds a default `site.
 go test ./...                          # all packages
 go vet ./...
 gofmt -w .
-node scripts/editor-shortcuts.test.mjs # editor keyboard shortcuts (needs node)
+node scripts/editor-shortcuts.test.mjs # editor shortcuts + image upload (needs node)
+node scripts/lightbox.test.mjs         # article lightbox
 DTCOM_BASE_URL=http://localhost:8080 \
 DTCOM_ADMIN_PASSWORD_HASH='$2a$10$...' \
 DTCOM_TOTP_SECRET=<base32> \
