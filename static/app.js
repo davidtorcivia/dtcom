@@ -102,6 +102,146 @@
     }
   }
 
+  // === Lightbox ===
+  //
+  // Post images are stored at up to 2000px but the reading column is ~1080px,
+  // so most of them are being shown smaller than they are. Clicking opens the
+  // full-size file.
+  //
+  // Only images that actually have more to show become clickable. Offering a
+  // zoom on a picture already at its natural size is a promise the lightbox
+  // cannot keep, and a chart that fits is the common case.
+  //
+  // Built on <dialog>, like the admin's confirmation prompt: Escape, the
+  // backdrop, and returning focus to whatever opened it all come free, and none
+  // of it needs an inline script the CSP would refuse.
+  function initLightbox() {
+    var prose = document.querySelector('.article-prose-body');
+    if (!prose) {
+      return;
+    }
+    var box = null;
+
+    function build() {
+      var d = document.createElement('dialog');
+      d.className = 'lightbox';
+      d.innerHTML =
+        '<button type="button" class="lightbox-close" aria-label="Close">Close</button>' +
+        '<img class="lightbox-img" alt="">' +
+        '<p class="lightbox-caption"></p>';
+      document.body.appendChild(d);
+
+      d.addEventListener('click', function (e) {
+        // A click on the dialog itself is the backdrop or the padding around
+        // the image. Clicks on the image are left alone so it can be examined
+        // without the thing shutting under the pointer.
+        if (e.target === d || e.target.classList.contains('lightbox-close')) {
+          d.close();
+        }
+      });
+      return d;
+    }
+
+    // zoomable reports whether the file has detail the page is not showing.
+    // A hidden image — the unused half of a light/dark pair — has no layout
+    // width at all, so it is skipped rather than counted as infinitely zoomable.
+    function zoomable(img) {
+      if (!img.naturalWidth || !img.clientWidth) {
+        return false;
+      }
+      // A couple of pixels of slack: layout rounding should not make an image
+      // that exactly fits look like it has more to give.
+      return img.naturalWidth > img.clientWidth + 2;
+    }
+
+    function captionFor(img) {
+      var fig = img.closest ? img.closest('figure') : null;
+      var cap = fig ? fig.querySelector('figcaption') : null;
+      if (cap && cap.textContent.trim()) {
+        return cap.textContent.trim();
+      }
+      return img.getAttribute('alt') || '';
+    }
+
+    function open(img) {
+      if (!box) {
+        box = build();
+      }
+      if (typeof box.showModal !== 'function') {
+        return; // no <dialog> support: the image is still there on the page
+      }
+      var full = box.querySelector('.lightbox-img');
+      full.src = img.currentSrc || img.src;
+      full.alt = img.getAttribute('alt') || '';
+      var caption = box.querySelector('.lightbox-caption');
+      caption.textContent = captionFor(img);
+      caption.hidden = !caption.textContent;
+      box.showModal();
+      box.querySelector('.lightbox-close').focus();
+    }
+
+    function mark(img) {
+      var can = zoomable(img);
+      img.classList.toggle('is-zoomable', can);
+      if (can) {
+        // An <img> is not focusable, so keyboard users need both of these to
+        // reach it at all.
+        img.setAttribute('tabindex', '0');
+        img.setAttribute('role', 'button');
+        img.setAttribute('aria-label', 'View full size: ' + (captionFor(img) || 'image'));
+      } else {
+        img.removeAttribute('tabindex');
+        img.removeAttribute('role');
+        img.removeAttribute('aria-label');
+      }
+    }
+
+    var imgs = Array.prototype.slice.call(prose.querySelectorAll('img'));
+    if (!imgs.length) {
+      return;
+    }
+
+    function markAll() {
+      imgs.forEach(mark);
+    }
+
+    imgs.forEach(function (img) {
+      if (img.complete) {
+        mark(img);
+      } else {
+        img.addEventListener('load', function () { mark(img); });
+      }
+      img.addEventListener('click', function () {
+        if (zoomable(img)) {
+          open(img);
+        }
+      });
+      img.addEventListener('keydown', function (e) {
+        if ((e.key === 'Enter' || e.key === ' ') && zoomable(img)) {
+          e.preventDefault();
+          open(img);
+        }
+      });
+    });
+
+    // Whether an image has room to grow depends on the column width, so the
+    // answer changes when the window does.
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(markAll, 150);
+    });
+
+    // Switching theme swaps which half of a light/dark pair is displayed, and
+    // the newly visible one has only just acquired a layout width.
+    if (window.MutationObserver) {
+      new MutationObserver(markAll).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme'],
+      });
+    }
+  }
+
   // === Search (only runs on /search, where #search-input exists) ===
   function initSearch() {
     var input = document.getElementById('search-input');
@@ -231,5 +371,6 @@
     initTheme();
     initBeacon();
     initSearch();
+    initLightbox();
   });
 })();
