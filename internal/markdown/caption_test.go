@@ -158,6 +158,111 @@ func TestMultipleFiguresInOneDocument(t *testing.T) {
 	}
 }
 
+// Two images tagged #light and #dark collapse into one figure holding both,
+// with a single caption. CSS paints whichever matches the theme.
+func TestThemedImagePairBecomesOneFigure(t *testing.T) {
+	out, err := Render("![A chart](/images/fig-light.png#light)\n![A chart](/images/fig-dark.png#dark)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, "<figure>"); n != 1 {
+		t.Fatalf("got %d figures, want one holding both images:\n%s", n, out)
+	}
+	if n := strings.Count(out, "<img "); n != 2 {
+		t.Errorf("expected both images in the figure, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, `class="theme-light"`) || !strings.Contains(out, `class="theme-dark"`) {
+		t.Errorf("theme classes missing:\n%s", out)
+	}
+	if n := strings.Count(out, "<figcaption>"); n != 1 {
+		t.Errorf("expected exactly one caption, got %d:\n%s", n, out)
+	}
+	// The marker has done its job in the renderer; leaving it would send a
+	// fragment along on every image request.
+	if strings.Contains(out, "#light") || strings.Contains(out, "#dark") {
+		t.Errorf("theme marker left in the src:\n%s", out)
+	}
+	if !strings.Contains(out, `src="/images/fig-light.png"`) || !strings.Contains(out, `src="/images/fig-dark.png"`) {
+		t.Errorf("cleaned srcs missing:\n%s", out)
+	}
+}
+
+// Order should not matter — dark first is just as valid.
+func TestThemedPairInEitherOrder(t *testing.T) {
+	out, err := Render("![A chart](/images/d.png#dark)\n![A chart](/images/l.png#light)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, "<figure>"); n != 1 {
+		t.Errorf("dark-first pair did not combine:\n%s", out)
+	}
+}
+
+// A lone tagged image is legitimate: show this one only in dark mode. It gets
+// its class and its caption, and no partner is invented.
+func TestSingleThemedImage(t *testing.T) {
+	out, err := Render("![Only in dark](/images/d.png#dark)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `class="theme-dark"`) {
+		t.Errorf("theme class missing:\n%s", out)
+	}
+	if !strings.Contains(out, "<figcaption>Only in dark</figcaption>") {
+		t.Errorf("caption missing:\n%s", out)
+	}
+	if strings.Contains(out, "#dark") {
+		t.Errorf("marker left in the src:\n%s", out)
+	}
+}
+
+// Two ordinary images on consecutive lines are one markdown paragraph, but they
+// are not a themed pair and must not be silently merged into a figure.
+func TestTwoUntaggedImagesAreNotAPair(t *testing.T) {
+	out, err := Render("![One](/images/a.png)\n![Two](/images/b.png)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "<figure") {
+		t.Errorf("untagged images were merged into a figure:\n%s", out)
+	}
+}
+
+// Two images tagged the same way are not a pair either.
+func TestTwoSameThemeImagesAreNotAPair(t *testing.T) {
+	out, err := Render("![One](/images/a.png#dark)\n![Two](/images/b.png#dark)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "<figure") {
+		t.Errorf("two dark images were treated as a pair:\n%s", out)
+	}
+}
+
+// The caption falls back to whichever image carries alt text, so tagging only
+// one of the pair still produces a caption.
+func TestThemedPairCaptionFallsBack(t *testing.T) {
+	out, err := Render("![](/images/l.png#light)\n![The chart](/images/d.png#dark)\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "<figcaption>The chart</figcaption>") {
+		t.Errorf("caption did not fall back to the second image:\n%s", out)
+	}
+}
+
+// A theme marker on an inline image is not a figure and must not gain a class
+// or a caption.
+func TestInlineThemedImageIsLeftAlone(t *testing.T) {
+	out, err := Render("Text ![x](/images/a.png#dark) more.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "<figure") || strings.Contains(out, "theme-dark") {
+		t.Errorf("inline themed image was promoted:\n%s", out)
+	}
+}
+
 // A fenced block that happens to contain image markup is code, not an image.
 func TestImageMarkupInCodeIsNotCaptioned(t *testing.T) {
 	out, err := Render("```md\n![Not a caption](/images/x.jpg)\n```\n")

@@ -561,6 +561,51 @@ mark, .highlight {
   text-decoration-color: var(--text-muted);
 }
 
+/* ---------------------------------------------------------------------------
+   Theme-swapped figures
+
+   An image tagged #light or #dark in its URL is shown only under that theme.
+   Both files are in the markup and CSS decides which one is painted.
+
+   This is keyed on data-theme rather than done with <picture> and
+   prefers-color-scheme, which would have been the obvious construct and is
+   wrong here: that media query follows the operating system only, so a reader
+   who picks dark from the toggle in the header on a light desktop would still
+   be served the light chart.
+
+   The order below matters. The media query has to come first so that an
+   explicit data-theme, set by the toggle, overrides it — the same cascade the
+   colour variables at the top of this file rely on.
+   -------------------------------------------------------------------------- */
+.theme-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-dark {
+    display: block;
+  }
+  :root:not([data-theme="light"]) .theme-light {
+    display: none;
+  }
+}
+
+[data-theme="dark"] .theme-dark {
+  display: block;
+}
+
+[data-theme="dark"] .theme-light {
+  display: none;
+}
+
+[data-theme="light"] .theme-light {
+  display: block;
+}
+
+[data-theme="light"] .theme-dark {
+  display: none;
+}
+
 .article-prose-body h2 {
   font-family: var(--font-sans) !important;
   font-size: 1.375rem !important;

@@ -1,3 +1,13 @@
+# Images belonging to posts. Same rule as content/ below: this is the author's
+# material, not the project's source. They are uploaded through /admin, which
+# stores them in the data volume under data/images/ and serves them from
+# /images/ — nothing needs them in the repo, and a post's artwork would
+# otherwise put megabytes of binaries into git history permanently.
+#
+# Site chrome that IS source (a default OG image, say) can be committed with
+# `git add -f`, or lives beside the other static assets outside this directory.
+/static/images/
+
 # The author's content, not the project's source.
 #
 # Posts and site.yml are data. They are written by hand, by /admin, by the REST
