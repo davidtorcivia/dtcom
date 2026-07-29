@@ -68,6 +68,19 @@ Body text in markdown.
 
 The watcher rebuilds once writes settle (~500ms). Drafts (`draft: true`) are excluded from the build, and un-drafting or deleting a post removes its published pages on the next rebuild.
 
+Beyond GFM, a post body gets footnotes (`[^1]`), `==highlight==`, syntax-highlighted code fences, LaTeX math (`$inline$` and `$$display$$`, typeset by KaTeX, loaded only on pages that have some), and figures:
+
+```markdown
+![A caption](/images/chart.png)
+
+![The transfer function](/images/fig-light.png#light)
+![The transfer function](/images/fig-dark.png#dark)
+```
+
+An image alone in its paragraph becomes a `<figure>` and its alt text becomes the visible caption — markdown has no caption syntax, and alt is the one place a description already belongs. An image used mid-sentence is left as prose.
+
+Tag a pair of URLs `#light` and `#dark` and they collapse into a single figure that swaps with the theme. The swap is CSS keyed on `data-theme`, not a `<picture>` element with `prefers-color-scheme`: that media query follows the operating system only, so it would ignore the toggle in the site header. Both files are in the markup and the browser fetches both, which is the cost of honouring a manual toggle.
+
 **Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each upload is re-encoded (which strips EXIF), downscaled to 2000px, and stored under a content-derived name.
 
 **API / MCP.** See the two sections below. These are the paths an LLM client uses. `/admin/integrations` shows the live token, a ready-to-paste MCP client config, and the full endpoint list.
