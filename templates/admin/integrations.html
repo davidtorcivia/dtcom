@@ -80,6 +80,9 @@ and restarting.</p>
 <ul>{{range .Tools}}<li><code>{{.}}</code></li>{{end}}</ul>
 </div>{{end}}
 </div>
+<p class="admin-hint">Each tool declares whether it reads, writes or destroys, so a client knows what to ask you
+about before calling it. Every post is also offered as a resource at <code>dtcom://article/&lt;slug&gt;</code>,
+which is how you attach one as context without the model having to fetch it.</p>
 </section>
 
 <section class="admin-section">
