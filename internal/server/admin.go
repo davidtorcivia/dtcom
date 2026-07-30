@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -189,19 +190,106 @@ type barRow struct {
 	Day     string
 	Count   int64
 	Percent int
+	// Share is the row's slice of the window's total views, which is the
+	// question a "most read" list is really being asked.
+	Share int
+}
+
+// chartBar is one column of the views chart.
+type chartBar struct {
+	Key     string // the day or month it covers, machine form
+	Label   string // "12 Jul 2026" / "Jul 2026"
+	Count   int64
+	Percent int
+	// Tick marks a column worth labelling on the axis — the first of a month
+	// on a daily chart, January on a monthly one. Without it a 90-day chart
+	// has ninety labels or two.
+	Tick     bool
+	TickText string
 }
 
 // maxDashboardRows bounds the "most read" list; the full breakdown is
 // available through /api/v1/stats.
 const maxDashboardRows = 10
 
+// dashboardRange is one option in the range selectors above the charts.
+//
+// Days counts back from today; zero means everything there is. The set is
+// deliberately short — these are the spans a person actually asks for, and a
+// free-text date picker on a personal dashboard is a form to fill in rather
+// than a number to read.
+type dashboardRange struct {
+	Key   string
+	Label string
+	Days  int
+}
+
+var dashboardRanges = []dashboardRange{
+	{"7d", "7 days", 7},
+	{"30d", "30 days", 30},
+	{"90d", "90 days", 90},
+	{"12m", "12 months", 365},
+	{"all", "All time", 0},
+}
+
+const (
+	defaultChartRange = "30d"
+	defaultTopRange   = "30d"
+)
+
+// lookupRange finds a range by key, falling back to def for anything absent or
+// unrecognised — this comes from the query string.
+func lookupRange(key, def string) dashboardRange {
+	for _, r := range dashboardRanges {
+		if r.Key == key {
+			return r
+		}
+	}
+	for _, r := range dashboardRanges {
+		if r.Key == def {
+			return r
+		}
+	}
+	return dashboardRanges[0]
+}
+
+// since returns the first day the range covers, given the day history starts.
+// The empty string means "no lower bound", which only the all-time range wants
+// for its counting queries.
+func (r dashboardRange) since(today time.Time, first string) string {
+	if r.Days == 0 {
+		return first
+	}
+	return today.AddDate(0, 0, -(r.Days - 1)).Format("2006-01-02")
+}
+
+// rangeOption is a range as the template draws it: a label, whether it is the
+// current one, and the URL that selects it while leaving the other chart alone.
+type rangeOption struct {
+	Key    string
+	Label  string
+	Active bool
+	URL    string
+}
+
+func rangeOptions(param, selected, other, otherKey string) []rangeOption {
+	out := make([]rangeOption, 0, len(dashboardRanges))
+	for _, r := range dashboardRanges {
+		q := url.Values{}
+		q.Set(param, r.Key)
+		q.Set(other, otherKey)
+		out = append(out, rangeOption{
+			Key:    r.Key,
+			Label:  r.Label,
+			Active: r.Key == selected,
+			URL:    "/admin?" + q.Encode(),
+		})
+	}
+	return out
+}
+
 func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	if !d.adminReady(w) {
-		return
-	}
-	stats, err := d.Store.Stats()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	arts, err := build.LoadArticles(d.postsDir())
@@ -228,52 +316,219 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		recent = recent[:5]
 	}
 
-	// Top paths, scaled against the busiest one.
-	top := stats.ByPath
-	if len(top) > maxDashboardRows {
-		top = top[:maxDashboardRows]
+	today := time.Now().UTC()
+	todayStr := today.Format("2006-01-02")
+	firstDay, err := d.Store.FirstViewDay()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	var maxPath int64
-	for _, p := range top {
-		maxPath = max(maxPath, p.Count)
-	}
-	topRows := make([]barRow, 0, len(top))
-	for _, p := range top {
-		topRows = append(topRows, barRow{Path: p.Path, Count: p.Count, Percent: percentOf(p.Count, maxPath)})
+	if firstDay == "" {
+		firstDay = todayStr // nothing recorded yet; an empty window of one day
 	}
 
-	// Per-day bars, scaled against the busiest day.
-	var maxDay int64
-	var today int64
-	todayStr := todayUTC()
-	for _, dc := range stats.ByDay {
-		maxDay = max(maxDay, dc.Count)
-		if dc.Day == todayStr {
-			today = dc.Count
-		}
+	chartRange := lookupRange(r.URL.Query().Get("chart"), defaultChartRange)
+	topRange := lookupRange(r.URL.Query().Get("top"), defaultTopRange)
+
+	chart, chartErr := d.viewsChart(chartRange, today, firstDay)
+	if chartErr != nil {
+		writeError(w, http.StatusInternalServerError, chartErr)
+		return
 	}
-	dayRows := make([]barRow, 0, len(stats.ByDay))
-	for _, dc := range stats.ByDay {
-		dayRows = append(dayRows, barRow{Day: dc.Day, Count: dc.Count, Percent: percentOf(dc.Count, maxDay)})
+
+	// Most read, scaled against the busiest path and against the window's total
+	// so each row can show both its bar and its share.
+	topSince := topRange.since(today, firstDay)
+	if topRange.Days == 0 {
+		topSince = "" // all time: no lower bound at all
 	}
-	var rangeStart, rangeEnd string
-	if len(dayRows) > 0 {
-		rangeStart, rangeEnd = dayRows[0].Day, dayRows[len(dayRows)-1].Day
+	topPaths, err := d.Store.TopPaths(topSince, maxDashboardRows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	topTotal, err := d.Store.TotalViews(topSince)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	var maxPath int64
+	for _, p := range topPaths {
+		maxPath = max(maxPath, p.Count)
+	}
+	topRows := make([]barRow, 0, len(topPaths))
+	for _, p := range topPaths {
+		topRows = append(topRows, barRow{
+			Path:    p.Path,
+			Count:   p.Count,
+			Percent: percentOf(p.Count, maxPath),
+			Share:   percentOf(p.Count, topTotal),
+		})
+	}
+
+	total, err := d.Store.TotalViews("")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	todayCount, err := d.Store.TotalViews(todayStr)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 
 	d.adminTmpls.render(w, "dashboard", d.adminData("Dashboard", map[string]any{
-		"Stats":         stats,
-		"Site":          d.Site(),
-		"PostCount":     published,
-		"DraftCount":    drafts,
-		"LinkCount":     len(links),
-		"Today":         today,
-		"TopPaths":      topRows,
-		"Days":          dayRows,
-		"DayRangeStart": rangeStart,
-		"DayRangeEnd":   rangeEnd,
-		"Recent":        recent,
+		"Site":       d.Site(),
+		"PostCount":  published,
+		"DraftCount": drafts,
+		"LinkCount":  len(links),
+		"Total":      total,
+		"Today":      todayCount,
+		"Recent":     recent,
+
+		"Chart":        chart.bars,
+		"ChartTotal":   chart.total,
+		"ChartPeak":    chart.peak,
+		"ChartPeakAt":  chart.peakAt,
+		"ChartMax":     chart.scale,
+		"ChartGrain":   chart.grain,
+		"ChartStart":   chart.start,
+		"ChartEnd":     chart.end,
+		"ChartRange":   chartRange,
+		"ChartRanges":  rangeOptions("chart", chartRange.Key, "top", topRange.Key),
+		"TopPaths":     topRows,
+		"TopRange":     topRange,
+		"TopRanges":    rangeOptions("top", topRange.Key, "chart", chartRange.Key),
+		"TopRangeSum":  topTotal,
+		"AnalyticsOn":  d.Site() != nil && d.Site().Analytics.Enabled(),
+		"AnalyticsURL": analyticsDashboardURL(d.Site()),
 	}))
+}
+
+// viewsChart is the assembled bar chart for one range.
+type viewsChart struct {
+	bars   []chartBar
+	total  int64
+	peak   int64
+	peakAt string
+	scale  int64  // the value the tallest bar represents, i.e. the y-axis top
+	grain  string // "day" or "month", for the panel's subtitle
+	start  string
+	end    string
+}
+
+// chartDayLimit is how many days a chart will draw one bar each for. Past it
+// the window is bucketed by month: ninety bars across a panel is already a bar
+// every few pixels, and a year of them is a smear.
+const chartDayLimit = 92
+
+func (d *Deps) viewsChart(rng dashboardRange, today time.Time, firstDay string) (*viewsChart, error) {
+	since := rng.since(today, firstDay)
+	until := today.Format("2006-01-02")
+
+	// A day per bar while the window is short enough to read; months beyond.
+	byDay := true
+	if rng.Days == 0 || rng.Days > chartDayLimit {
+		start, err := time.Parse("2006-01-02", since)
+		if err != nil {
+			return nil, err
+		}
+		byDay = today.Sub(start) <= chartDayLimit*24*time.Hour
+	}
+
+	var (
+		buckets []store.Bucket
+		err     error
+	)
+	c := &viewsChart{grain: "month"}
+	if byDay {
+		c.grain = "day"
+		buckets, err = d.Store.ViewsByDay(since, until)
+	} else {
+		buckets, err = d.Store.ViewsByMonth(since, until)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	for _, b := range buckets {
+		c.total += b.Count
+		if b.Count > c.peak {
+			c.peak, c.peakAt = b.Count, b.Label
+		}
+	}
+	// Scale to a round number at or above the peak, never to zero: an empty
+	// window should draw an empty chart of the right height rather than
+	// collapse to nothing. The true peak is in the summary line above, so the
+	// axis is free to be readable instead of exact.
+	c.scale = niceCeil(c.peak)
+
+	c.bars = make([]chartBar, 0, len(buckets))
+	for _, b := range buckets {
+		bar := chartBar{
+			Key:     b.Key,
+			Label:   b.Label,
+			Count:   b.Count,
+			Percent: percentOf(b.Count, c.scale),
+		}
+		bar.Tick, bar.TickText = axisTick(b.Key, byDay)
+		c.bars = append(c.bars, bar)
+	}
+	if len(buckets) > 0 {
+		c.start, c.end = buckets[0].Label, buckets[len(buckets)-1].Label
+	}
+	return c, nil
+}
+
+// niceCeil rounds a chart's peak up to a value worth printing on an axis: two
+// significant figures, and even.
+//
+// Both halves earn their keep. Two significant figures means a peak of 291
+// draws an axis topped at 300 rather than 291, and wastes at most a few per
+// cent of the plot doing it. Even means the midpoint gridline can be labelled
+// with a whole number — labelling the geometric middle of a 7-view chart as "4"
+// put the number half a view away from the line it belonged to.
+func niceCeil(n int64) int64 {
+	if n <= 2 {
+		return 2
+	}
+	mag := int64(1)
+	for n/mag >= 100 {
+		mag *= 10
+	}
+	v := ((n + mag - 1) / mag) * mag
+	if v%2 != 0 {
+		v += mag
+	}
+	return v
+}
+
+// axisTick decides whether a column earns a label on the axis: the first of the
+// month on a daily chart, January on a monthly one.
+func axisTick(key string, byDay bool) (bool, string) {
+	if byDay {
+		day, err := time.Parse("2006-01-02", key)
+		if err != nil || day.Day() != 1 {
+			return false, ""
+		}
+		return true, day.Format("Jan")
+	}
+	month, err := time.Parse("2006-01", key)
+	if err != nil || month.Month() != time.January {
+		return false, ""
+	}
+	return true, month.Format("2006")
+}
+
+// analyticsDashboardURL points at the configured tracker's own site, so the
+// panel can offer a way through to the numbers this dashboard does not keep.
+// The script URL's origin is the best guess available without asking for a
+// second setting nobody wants to fill in.
+func analyticsDashboardURL(site *siteconfig.Config) string {
+	if site == nil {
+		return ""
+	}
+	return site.Analytics.Origin()
 }
 
 // percentOf scales n against maxN for a bar width, with a floor of 2% so a

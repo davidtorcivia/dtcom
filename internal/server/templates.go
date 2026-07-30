@@ -38,6 +38,12 @@ func adminTemplateFuncs(fp *assets.Fingerprinter) template.FuncMap {
 		"formatDate":     func(t time.Time) string { return t.Format("2006-01-02") },
 		"formatDateUnix": func(u int64) string { return time.Unix(u, 0).UTC().Format("2006-01-02") },
 		"add":            func(a, b int) int { return a + b },
+		// lower lets a range label ("30 days") sit mid-sentence without a
+		// second copy of the string in lower case.
+		"lower": strings.ToLower,
+		// halfOf labels the chart's midpoint gridline. Rounded up so the
+		// midpoint of a 1-view chart reads 1 rather than 0.
+		"halfOf": func(n int64) int64 { return (n + 1) / 2 },
 	}
 }
 

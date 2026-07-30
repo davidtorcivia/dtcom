@@ -568,34 +568,238 @@ input[type="file"]:focus-visible::file-selector-button {
   color: var(--text-muted);
 }
 
-/* Vertical bars for the 30-day view. */
-.spark {
+.bar-share {
+  display: inline-block;
+  min-width: 3.2rem;
+  text-align: right;
+  font-size: 0.6875rem;
+  opacity: 0.75;
+}
+
+/* --------------------------------------------------------------------------
+   Panels
+
+   The dashboard's unit: a hairline box with a title, a range selector, and a
+   one-line summary above whatever it is showing. The same shell holds the
+   chart, the most-read list and the recent-posts list, so the three read as
+   one instrument rather than three widgets.
+   -------------------------------------------------------------------------- */
+
+.panel {
+  border: 1px solid var(--text-muted) !important;
+  padding: 1.1rem 1.2rem 1.2rem;
+  margin-bottom: 1.5rem;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Scoped through .panel so it outranks the older `.stats-column h3` rule,
+   which still styles headings on the pages that have not moved to panels. */
+.panel .panel-title {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0;
+}
+
+.panel-more,
+.panel-foot {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.panel-more { text-transform: uppercase; letter-spacing: 0.06em; }
+.panel-more:hover { color: var(--accent); }
+
+.panel-foot {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--text-muted) !important;
+  line-height: 1.5;
+}
+
+/* The last row of a list already draws a dashed rule; the foot's own would sit
+   directly beneath it as a double line. */
+.panel .admin-list li:last-child { border-bottom: 0 !important; }
+
+.panel-summary {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-summary strong { color: var(--text); font-weight: 700; }
+
+/* Range selector. Plain links, so switching a range is a navigation the back
+   button understands and the whole thing works with scripting off. */
+.range-tabs { display: flex; gap: 1px; background: var(--text-muted); border: 1px solid var(--text-muted) !important; }
+
+.range-tab {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.6rem;
+  background: var(--bg);
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.range-tab:hover { background: var(--surface-hover); color: var(--text); }
+.range-tab.is-active { background: var(--text); color: var(--bg); }
+
+/* --------------------------------------------------------------------------
+   Views chart
+   -------------------------------------------------------------------------- */
+
+.chart {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+  height: 160px;
+}
+
+/* The y-axis: three labels pinned to the plot's top, middle and baseline, with
+   the gridlines drawn as borders on the bar area rather than as extra elements. */
+.chart-scale {
+  position: relative;
+  width: 2.5rem;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chart-scale span { position: absolute; right: 0; line-height: 1; }
+.chart-scale-max { top: 0; }
+.chart-scale-mid { top: 50%; transform: translateY(-50%); }
+.chart-scale-min { bottom: 0; transform: translateY(50%); }
+
+.chart-bars {
+  position: relative;
+  flex: 1;
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 90px;
-  padding-top: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
   border-bottom: 1px solid var(--text-muted) !important;
 }
 
-.spark-bar {
-  /* Grow to share the width, but never past a bar's worth: with a single
-     day of data an unbounded flex-basis fills the whole panel and the chart
-     reads as one solid block. */
+/* The midpoint gridline, drawn as a pseudo-element so it can be faint in both
+   themes — a surface colour is very nearly the background in each, which left
+   the y-axis midpoint labelled but not marked. Absolutely positioned, so it is
+   not a flex item and does not become a column. */
+.chart-bars::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed var(--text-muted);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* One column per bucket. The column is full height and the bar sits at the
+   bottom of it, so the whole column is the hover target — pointing at a quiet
+   day should not require hitting a two-pixel stub.
+
+   The columns share the full width rather than being capped at some sparkline
+   thickness, so the plot always spans the panel and the axis labels beneath it
+   line up with the first and last bar. A seven-day range therefore draws seven
+   broad bars, which is what a seven-day bar chart should look like. */
+.chart-col {
+  position: relative;
   flex: 1 1 0;
-  min-width: 3px;
-  max-width: 16px;
+  min-width: 2px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  cursor: default;
+}
+
+.chart-bar {
+  display: block;
+  width: 100%;
   min-height: 2px;
   background: var(--accent-yellow);
 }
 
-.spark-axis {
+/* A day nobody visited still gets a mark on the baseline, so the chart reads
+   as "nothing happened here" rather than as "the data stops here". */
+.chart-col.is-empty .chart-bar {
+  background: var(--text-muted);
+  opacity: 0.35;
+  height: 2px !important;
+}
+
+.chart-col:hover .chart-bar,
+.chart-col.is-hot .chart-bar { background: var(--accent); }
+
+/* A tick column marks the start of a month (or a year, on the monthly chart). */
+.chart-col.is-tick::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 1px;
+  height: 6px;
+  background: var(--text-muted);
+}
+
+.chart-axis {
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
   color: var(--text-muted);
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
+  padding-left: 3.1rem;
+}
+
+/* The hover readout, positioned by admin.js. Hidden until it has something to
+   say, and pointer-events: none so it can never sit between the cursor and the
+   column it describes. */
+.chart-tip {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--text);
+  color: var(--bg);
+  padding: 0.35rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transform: translate(-50%, -100%);
+  opacity: 0;
+  transition: opacity 90ms linear;
+}
+
+.chart-tip.is-visible { opacity: 1; }
+.chart-tip-count { font-weight: 700; }
+.chart-tip-label { opacity: 0.7; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-tip { transition: none; }
 }
 
 /* --------------------------------------------------------------------------
@@ -733,9 +937,13 @@ input[type="file"]:focus-visible::file-selector-button {
 .link-note { font-family: var(--font-sans); font-size: 0.75rem; color: var(--text-muted); }
 
 @media (max-width: 640px) {
-  .bar-list li { grid-template-columns: minmax(0, 1fr) 3rem; }
+  .bar-list li { grid-template-columns: minmax(0, 1fr) 5rem; }
   .bar-track { display: none; }
   .feed-url { max-width: 100%; }
+  .panel-head { gap: 0.6rem; }
+  .range-tabs { width: 100%; }
+  .range-tab { flex: 1; text-align: center; padding: 0.3rem 0.35rem; }
+  .chart { height: 120px; }
 }
 
 /* --------------------------------------------------------------------------
