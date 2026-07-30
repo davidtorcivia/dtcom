@@ -139,8 +139,16 @@ type linkInput struct {
 // Articles
 // ---------------------------------------------------------------------------
 
+// articleSummary is one article as the list endpoints project it: enough to
+// choose between them, without the body.
+//
+// Description is in here because both list surfaces have always claimed it —
+// the REST endpoint's documentation and the list_articles tool description
+// both say "and description" — and neither actually sent it. Now that the tool
+// publishes an output schema, that gap would be advertised.
 type articleSummary struct {
 	Slug, Title, Date string
+	Description       string
 	Draft             bool
 }
 
@@ -153,8 +161,8 @@ func (d *Deps) apiListArticles(w http.ResponseWriter, r *http.Request) {
 	res := make([]articleSummary, 0, len(arts))
 	for _, a := range arts {
 		res = append(res, articleSummary{
-			Slug: a.Slug, Title: a.Title,
-			Date: a.Date.Format("2006-01-02"), Draft: a.Draft,
+			Slug: a.Slug, Title: a.Title, Date: a.Date.Format("2006-01-02"),
+			Description: a.Description, Draft: a.Draft,
 		})
 	}
 	writeJSON(w, http.StatusOK, res)

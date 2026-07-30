@@ -304,3 +304,203 @@ func jsonRPCResult(t *testing.T, body string) []byte {
 	t.Fatalf("no JSON-RPC result in response:\n%s", body)
 	return nil
 }
+
+// TestMCPToolOutputValidates calls every tool that reads and checks the answer
+// comes back as structuredContent.
+//
+// The point is the validation, not the values. Declaring an output schema means
+// the SDK validates each result against it, and a mismatch is a protocol error
+// rather than a tool error — the client gets no result at all. It is also easy
+// to trip over: a nil Go map is not a JSON object, which is exactly how
+// get_site broke the first time these schemas were turned on.
+func TestMCPToolOutputValidates(t *testing.T) {
+	d := newTestDeps(t)
+
+	// A site with nothing in it: empty lists, unset maps, no views recorded.
+	// That is the shape most likely to fall foul of a schema.
+	readOnly := map[string]string{
+		"list_articles":   `{}`,
+		"get_article":     `{"slug":"hello"}`,
+		"search_articles": `{"query":"nothing matches this"}`,
+		"list_links":      `{}`,
+		"get_site":        `{}`,
+		"get_stats":       `{}`,
+	}
+	for name, args := range readOnly {
+		rec := mcpPost(t, d,
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+name+`","arguments":`+args+
+				`,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+			map[string]string{
+				"Mcp-Protocol-Version": "2026-07-28",
+				"Mcp-Method":           "tools/call",
+				"Mcp-Name":             name,
+			})
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, body: %s", name, rec.Code, rec.Body.String())
+			continue
+		}
+		var res struct {
+			StructuredContent json.RawMessage `json:"structuredContent"`
+			IsError           bool            `json:"isError"`
+		}
+		if err := json.Unmarshal(jsonRPCResult(t, rec.Body.String()), &res); err != nil {
+			t.Errorf("%s: decode result: %v", name, err)
+			continue
+		}
+		if res.IsError {
+			t.Errorf("%s: returned a tool error: %s", name, rec.Body.String())
+			continue
+		}
+		if len(res.StructuredContent) == 0 {
+			t.Errorf("%s: no structuredContent — the output schema is not being applied", name)
+		}
+	}
+
+	// And every tool advertises the schema its answer is validated against.
+	var listed struct {
+		Tools []struct {
+			Name         string          `json:"name"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"tools"`
+	}
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/list"})
+	if err := json.Unmarshal(jsonRPCResult(t, rec.Body.String()), &listed); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	for _, tool := range listed.Tools {
+		if len(tool.OutputSchema) == 0 {
+			t.Errorf("tool %q has no output schema", tool.Name)
+		}
+	}
+}
+
+// mcpCall runs one tool and fails the test if it does not succeed.
+func mcpCall(t *testing.T, d *testDeps, tool, args string) {
+	t.Helper()
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+tool+`","arguments":`+args+
+			`,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{
+			"Mcp-Protocol-Version": "2026-07-28",
+			"Mcp-Method":           "tools/call",
+			"Mcp-Name":             tool,
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s: status = %d, body: %s", tool, rec.Code, rec.Body.String())
+	}
+	if containsStr(rec.Body.String(), `"isError":true`) {
+		t.Fatalf("%s: tool error: %s", tool, rec.Body.String())
+	}
+}
+
+type listedResources struct {
+	Resources []struct {
+		URI         string `json:"uri"`
+		Name        string `json:"name"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		MIMEType    string `json:"mimeType"`
+	} `json:"resources"`
+}
+
+func mcpListResources(t *testing.T, d *testDeps) listedResources {
+	t.Helper()
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "resources/list"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resources/list status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var out listedResources
+	if err := json.Unmarshal(jsonRPCResult(t, rec.Body.String()), &out); err != nil {
+		t.Fatalf("decode resources/list: %v", err)
+	}
+	return out
+}
+
+// TestMCPArticleResources covers posts offered as resources rather than as tool
+// calls: they are listed, they can be read, and — the part that needed care —
+// the list follows the posts rather than whatever was on disk at startup.
+func TestMCPArticleResources(t *testing.T) {
+	d := newTestDeps(t)
+
+	listed := mcpListResources(t, d)
+	if len(listed.Resources) != 1 {
+		t.Fatalf("expected the one fixture post, got %d: %+v", len(listed.Resources), listed.Resources)
+	}
+	got := listed.Resources[0]
+	if got.URI != "dtcom://article/hello" {
+		t.Errorf("resource URI = %q", got.URI)
+	}
+	if got.Title != "Hello" || got.MIMEType != "text/markdown" {
+		t.Errorf("resource metadata = %+v", got)
+	}
+
+	// Reading one gives the markdown source, frontmatter and all.
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"dtcom://article/hello","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{
+			"Mcp-Protocol-Version": "2026-07-28",
+			"Mcp-Method":           "resources/read",
+			"Mcp-Name":             "dtcom://article/hello",
+		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resources/read status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"title: Hello", "Body text."} {
+		if !containsStr(body, want) {
+			t.Errorf("resource body missing %q:\n%s", want, body)
+		}
+	}
+
+	// A post written since the list was last built shows up, and one deleted
+	// since drops off. A list fixed at startup would get both wrong.
+	mcpCall(t, d, "create_article", `{"title":"Second Post","body":"more words","description":"the second"}`)
+	listed = mcpListResources(t, d)
+	if len(listed.Resources) != 2 {
+		t.Fatalf("a new post did not appear: %+v", listed.Resources)
+	}
+
+	mcpCall(t, d, "delete_article", `{"slug":"hello"}`)
+	listed = mcpListResources(t, d)
+	if len(listed.Resources) != 1 {
+		t.Fatalf("a deleted post did not drop off: %+v", listed.Resources)
+	}
+	if listed.Resources[0].URI != "dtcom://article/second-post" {
+		t.Errorf("wrong post survived: %+v", listed.Resources[0])
+	}
+
+	// Reading a post that is gone is a not-found, not a crash or an empty file.
+	rec = mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"dtcom://article/hello","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{
+			"Mcp-Protocol-Version": "2026-07-28",
+			"Mcp-Method":           "resources/read",
+			"Mcp-Name":             "dtcom://article/hello",
+		})
+	if !containsStr(rec.Body.String(), "error") {
+		t.Errorf("reading a deleted post did not fail:\n%s", rec.Body.String())
+	}
+}
+
+// TestMCPArticleResourceURIsAreChecked: the slug in a resource URI reaches the
+// filesystem, so it gets the same check every other slug-taking path gets.
+func TestMCPArticleResourceURIsAreChecked(t *testing.T) {
+	for _, uri := range []string{
+		"dtcom://article/../../etc/passwd",
+		"dtcom://article/",
+		"dtcom://article/a/b",
+		"file:///etc/passwd",
+		"dtcom://other/hello",
+	} {
+		if _, ok := articleSlugFromURI(uri); ok {
+			t.Errorf("%q was accepted as an article URI", uri)
+		}
+	}
+	if slug, ok := articleSlugFromURI("dtcom://article/hello"); !ok || slug != "hello" {
+		t.Errorf("a valid URI was rejected: %q %v", slug, ok)
+	}
+}

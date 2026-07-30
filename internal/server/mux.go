@@ -56,6 +56,12 @@ type Deps struct {
 	// csp memoises the Content-Security-Policy, which varies only with the
 	// analytics origin configured in site.yml; see securityHeaders.
 	csp cspCache
+
+	// mcpArticleRes is the set of article URIs currently registered as MCP
+	// resources, so a sync knows which ones to withdraw; see
+	// syncArticleResources.
+	mcpResMu      sync.Mutex
+	mcpArticleRes map[string]bool
 }
 
 // New wires every route group and wraps the mux in the shared middleware:

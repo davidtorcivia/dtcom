@@ -60,7 +60,14 @@ type Analytics struct {
 	// Umami wants {"website-id": "…"}, Plausible {"domain": "…"}, Fathom
 	// {"site": "…"}. The key is written verbatim after "data-", so it is
 	// restricted to the characters an attribute name may contain.
-	Data map[string]string `yaml:"data,omitempty"`
+	//
+	// The json tag carries omitempty rather than a rename: this config is the
+	// output of the get_site MCP tool, which validates against a schema
+	// inferred from these types, and a nil map is not an object as far as JSON
+	// Schema is concerned. (A nil *slice* is fine — those infer as
+	// ["null","array"] — so this is the only field that needs it.) The name is
+	// spelled as Go spells it so the key on the wire does not change.
+	Data map[string]string `yaml:"data,omitempty" json:"Data,omitempty"`
 }
 
 // Enabled reports whether a tracker is configured.
