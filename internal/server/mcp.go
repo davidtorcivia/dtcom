@@ -12,21 +12,48 @@ import (
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/store"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // registerMCP wires the MCP-over-Streamable-HTTP endpoint at /mcp. Every tool
 // exposes the same content-management operations as the REST API, calling the
 // shared core methods on Deps so the two surfaces stay consistent.
+//
+// The server speaks the 2026-07-28 revision of the spec, which dropped the
+// initialize handshake and protocol-level sessions: each request stands alone
+// and carries its own protocol version in _meta. The SDK still answers older
+// clients (back to 2024-11-05) on the same endpoint, so upgrading here did not
+// cut anyone off.
 func registerMCP(mux *http.ServeMux, d *Deps) {
-	srv := mcpserver.NewMCPServer("dtcom", "1.0")
+	srv := mcp.NewServer(&mcp.Implementation{Name: "dtcom", Version: "1.0"}, &mcp.ServerOptions{
+		Instructions: "Read and write the content of a single-author website: articles " +
+			"(markdown posts), links, and site.yml configuration. Writes land on disk and " +
+			"trigger a rebuild, so they are live immediately.",
+	})
 	registerArticleTools(srv, d)
 	registerLinkTools(srv, d)
 	registerSiteTools(srv, d)
 	registerOpsTools(srv, d)
 
-	streamable := mcpserver.NewStreamableHTTPServer(srv)
+	streamable := mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return srv },
+		&mcp.StreamableHTTPOptions{
+			// Nothing here is per-connection state — every tool reads and writes
+			// the same files — so the sessionless mode the 2026-07-28 spec moved
+			// to is what this server always wanted.
+			Stateless: true,
+
+			// The SDK refuses requests that arrive on a loopback listener bearing
+			// a non-loopback Host, which is exactly the shape of a legitimate
+			// request when a tunnel or reverse proxy fronts us on 127.0.0.1. Only
+			// waive the check when the operator has said a proxy is really there;
+			// bound straight to the network, the protection stays on.
+			DisableLocalhostProtection: d.Cfg != nil && d.Cfg.TrustProxyHeaders,
+
+			// Deliberately not setting PropagateRequestCancellation: a dropped
+			// HTTP connection should not abort a half-finished write and rebuild.
+		},
+	)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		// Same throttled bearer check the REST API uses, so the token can't be
 		// guessed any faster here.
@@ -41,233 +68,230 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 // Article tools
 // ---------------------------------------------------------------------------
 
-func registerArticleTools(srv *mcpserver.MCPServer, d *Deps) {
-	srv.AddTool(
-		mcp.NewTool("list_articles",
-			mcp.WithDescription("List all articles with slug, title, date, draft status, and description."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			arts, err := build.LoadArticles(d.postsDir())
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(artSummaries(arts))), nil
-		},
-	)
+type noArgs struct{}
 
-	srv.AddTool(
-		mcp.NewTool("get_article",
-			mcp.WithDescription("Get a single article by slug: frontmatter + markdown body."),
-			mcp.WithString("slug", mcp.Required(), mcp.Description("Article slug, e.g. \"schedlock\".")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			slug := req.GetString("slug", "")
-			a, err := d.findArticleBySlug(slug)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if a == nil {
-				return mcp.NewToolResultError(fmt.Sprintf("article %q not found", slug)), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]any{
-				"slug": a.Slug, "title": a.Title, "date": a.Date.Format("2006-01-02"),
-				"description": a.Description, "tags": a.Tags, "draft": a.Draft, "body": a.Body,
-			})), nil
-		},
-	)
+type getArticleArgs struct {
+	Slug string `json:"slug" jsonschema:"Article slug, e.g. \"schedlock\"."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("create_article",
-			mcp.WithDescription("Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds."),
-			mcp.WithString("title", mcp.Required(), mcp.Description("Article title.")),
-			mcp.WithString("body", mcp.Required(), mcp.Description("Markdown body.")),
-			mcp.WithString("date", mcp.Description("YYYY-MM-DD. Defaults to today.")),
-			mcp.WithString("description", mcp.Description("Short description / summary.")),
-			mcp.WithArray("tags", mcp.WithStringItems(), mcp.Description("Tag list.")),
-			mcp.WithString("slug", mcp.Description("Override slug. Derived from title if omitted.")),
-			mcp.WithBoolean("draft", mcp.Description("Save as a draft (excluded from build).")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			in := articleInput{
-				Title:       req.GetString("title", ""),
-				Slug:        req.GetString("slug", ""),
-				Date:        req.GetString("date", ""),
-				Description: req.GetString("description", ""),
-				Tags:        req.GetStringSlice("tags", nil),
-				Body:        req.GetString("body", ""),
-				Draft:       req.GetBool("draft", false),
-			}
-			slug, status, err := d.createArticle(in)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("create failed (%d): %s", status, err)), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]any{"slug": slug, "status": "created"})), nil
-		},
-	)
+type createArticleArgs struct {
+	Title       string   `json:"title" jsonschema:"Article title."`
+	Body        string   `json:"body" jsonschema:"Markdown body."`
+	Date        string   `json:"date,omitempty" jsonschema:"YYYY-MM-DD. Defaults to today."`
+	Description string   `json:"description,omitempty" jsonschema:"Short description / summary."`
+	Tags        []string `json:"tags,omitempty" jsonschema:"Tag list."`
+	Slug        string   `json:"slug,omitempty" jsonschema:"Override slug. Derived from title if omitted."`
+	Draft       bool     `json:"draft,omitempty" jsonschema:"Save as a draft (excluded from build)."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("update_article",
-			mcp.WithDescription("Update an existing article identified by slug. Any field may be omitted to keep the current value."),
-			mcp.WithString("slug", mcp.Required(), mcp.Description("Slug of the article to update.")),
-			mcp.WithString("title", mcp.Description("New title.")),
-			mcp.WithString("body", mcp.Description("New markdown body.")),
-			mcp.WithString("date", mcp.Description("New date (YYYY-MM-DD). Defaults to original.")),
-			mcp.WithString("description", mcp.Description("New description.")),
-			mcp.WithArray("tags", mcp.WithStringItems(), mcp.Description("New tag list.")),
-			mcp.WithBoolean("draft", mcp.Description("Toggle draft status.")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			slug := req.GetString("slug", "")
-			a, err := d.findArticleBySlug(slug)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if a == nil {
-				return mcp.NewToolResultError(fmt.Sprintf("article %q not found", slug)), nil
-			}
-			// Build the input preserving existing fields unless overridden.
-			// Presence in the raw arguments — not emptiness — decides whether
-			// a field changes, so a caller can genuinely clear a description
-			// or empty a tag list. (Treating "" as "unchanged", as an earlier
-			// version did, made those edits impossible.)
-			args := rawArgs(req)
-			in := articleInput{
-				Title:       keepString(args, "title", a.Title),
-				Date:        req.GetString("date", ""),
-				Description: keepString(args, "description", a.Description),
-				Tags:        keepStrings(args, "tags", a.Tags),
-				Body:        keepString(args, "body", a.Body),
-				Draft:       req.GetBool("draft", a.Draft),
-			}
-			status, err := d.updateArticle(slug, in)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("update failed (%d): %s", status, err)), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]any{"slug": slug, "status": "updated"})), nil
-		},
-	)
+// updateArticleArgs uses pointers for the fields that may legitimately be set
+// to an empty value. Presence in the call — not emptiness — decides whether a
+// field changes, so a caller can genuinely clear a description or empty a tag
+// list. (Treating "" as "unchanged", as an earlier version did, made those
+// edits impossible.)
+type updateArticleArgs struct {
+	Slug        string    `json:"slug" jsonschema:"Slug of the article to update."`
+	Title       *string   `json:"title,omitempty" jsonschema:"New title."`
+	Body        *string   `json:"body,omitempty" jsonschema:"New markdown body."`
+	Date        string    `json:"date,omitempty" jsonschema:"New date (YYYY-MM-DD). Defaults to the original."`
+	Description *string   `json:"description,omitempty" jsonschema:"New description."`
+	Tags        *[]string `json:"tags,omitempty" jsonschema:"New tag list."`
+	Draft       *bool     `json:"draft,omitempty" jsonschema:"Toggle draft status."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("delete_article",
-			mcp.WithDescription("Delete an article by slug. Removes the .md file and rebuilds."),
-			mcp.WithString("slug", mcp.Required(), mcp.Description("Slug of the article to delete.")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			slug := req.GetString("slug", "")
-			status, err := d.deleteArticle(slug)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("delete failed (%d): %s", status, err)), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]any{"slug": slug, "status": "deleted"})), nil
-		},
-	)
+type searchArticlesArgs struct {
+	Query string `json:"query" jsonschema:"Search query."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("search_articles",
-			mcp.WithDescription("Full-text search across article titles, bodies, and tags."),
-			mcp.WithString("query", mcp.Required(), mcp.Description("Search query.")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			q := req.GetString("query", "")
-			hits, err := d.Store.SearchArticles(q, 20)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(hits)), nil
-		},
-	)
+func registerArticleTools(srv *mcp.Server, d *Deps) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_articles",
+		Description: "List all articles with slug, title, date, draft status, and description.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		arts, err := build.LoadArticles(d.postsDir())
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(artSummaries(arts))
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_article",
+		Description: "Get a single article by slug: frontmatter + markdown body.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, any, error) {
+		a, err := d.findArticleBySlug(args.Slug)
+		if err != nil {
+			return nil, nil, err
+		}
+		if a == nil {
+			return nil, nil, fmt.Errorf("article %q not found", args.Slug)
+		}
+		return jsonResult(map[string]any{
+			"slug": a.Slug, "title": a.Title, "date": a.Date.Format("2006-01-02"),
+			"description": a.Description, "tags": a.Tags, "draft": a.Draft, "body": a.Body,
+		})
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "create_article",
+		Description: "Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args createArticleArgs) (*mcp.CallToolResult, any, error) {
+		slug, status, err := d.createArticle(articleInput{
+			Title:       args.Title,
+			Slug:        args.Slug,
+			Date:        args.Date,
+			Description: args.Description,
+			Tags:        args.Tags,
+			Body:        args.Body,
+			Draft:       args.Draft,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("create failed (%d): %w", status, err)
+		}
+		return jsonResult(map[string]any{"slug": slug, "status": "created"})
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "update_article",
+		Description: "Update an existing article identified by slug. Any field may be omitted to keep the current value.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateArticleArgs) (*mcp.CallToolResult, any, error) {
+		a, err := d.findArticleBySlug(args.Slug)
+		if err != nil {
+			return nil, nil, err
+		}
+		if a == nil {
+			return nil, nil, fmt.Errorf("article %q not found", args.Slug)
+		}
+		status, err := d.updateArticle(args.Slug, articleInput{
+			Title:       orKeep(args.Title, a.Title),
+			Date:        args.Date,
+			Description: orKeep(args.Description, a.Description),
+			Tags:        orKeep(args.Tags, a.Tags),
+			Body:        orKeep(args.Body, a.Body),
+			Draft:       orKeep(args.Draft, a.Draft),
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("update failed (%d): %w", status, err)
+		}
+		return jsonResult(map[string]any{"slug": args.Slug, "status": "updated"})
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "delete_article",
+		Description: "Delete an article by slug. Removes the .md file and rebuilds.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, any, error) {
+		status, err := d.deleteArticle(args.Slug)
+		if err != nil {
+			return nil, nil, fmt.Errorf("delete failed (%d): %w", status, err)
+		}
+		return jsonResult(map[string]any{"slug": args.Slug, "status": "deleted"})
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "search_articles",
+		Description: "Full-text search across article titles, bodies, and tags.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args searchArticlesArgs) (*mcp.CallToolResult, any, error) {
+		hits, err := d.Store.SearchArticles(args.Query, 20)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(hits)
+	})
 }
 
 // ---------------------------------------------------------------------------
 // Link tools
 // ---------------------------------------------------------------------------
 
-func registerLinkTools(srv *mcpserver.MCPServer, d *Deps) {
-	srv.AddTool(
-		mcp.NewTool("list_links",
-			mcp.WithDescription("List all links (manual + RSS-imported), newest first."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			links, err := d.Store.ListLinks(500)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(links)), nil
-		},
-	)
+type addLinkArgs struct {
+	Label string `json:"label" jsonschema:"Link label / title."`
+	Href  string `json:"href" jsonschema:"Link URL."`
+	Note  string `json:"note,omitempty" jsonschema:"Optional note."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("add_link",
-			mcp.WithDescription("Add a manual link and rebuild."),
-			mcp.WithString("label", mcp.Required(), mcp.Description("Link label / title.")),
-			mcp.WithString("href", mcp.Required(), mcp.Description("Link URL.")),
-			mcp.WithString("note", mcp.Description("Optional note.")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			label := req.GetString("label", "")
-			href := req.GetString("href", "")
-			if label == "" || href == "" {
-				return mcp.NewToolResultError("label and href required"), nil
-			}
-			id, err := d.Store.AddLink(store.Link{
-				Label: label, Href: href, Note: req.GetString("note", ""),
-				Source: "manual", SortDate: time.Now().Unix(),
-			})
-			if err != nil {
-				switch {
-				case errors.Is(err, store.ErrDisallowedScheme):
-					return mcp.NewToolResultError("href must use http://, https://, or mailto:"), nil
-				case errors.Is(err, store.ErrDuplicateLink):
-					return mcp.NewToolResultError(fmt.Sprintf("a link with href %q already exists", href)), nil
-				}
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if err := d.Engine.Rebuild(); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]int64{"id": id})), nil
-		},
-	)
+type removeLinkArgs struct {
+	ID int64 `json:"id" jsonschema:"Link id from list_links."`
+}
 
-	srv.AddTool(
-		mcp.NewTool("remove_link",
-			mcp.WithDescription("Remove a manual link by id."),
-			mcp.WithNumber("id", mcp.Required(), mcp.Description("Link id from list_links.")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := req.GetInt("id", 0)
-			if id <= 0 {
-				return mcp.NewToolResultError("invalid id"), nil
+func registerLinkTools(srv *mcp.Server, d *Deps) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_links",
+		Description: "List all links (manual + RSS-imported), newest first.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		links, err := d.Store.ListLinks(500)
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(links)
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "add_link",
+		Description: "Add a manual link and rebuild.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args addLinkArgs) (*mcp.CallToolResult, any, error) {
+		if args.Label == "" || args.Href == "" {
+			return nil, nil, errors.New("label and href required")
+		}
+		id, err := d.Store.AddLink(store.Link{
+			Label: args.Label, Href: args.Href, Note: args.Note,
+			Source: "manual", SortDate: time.Now().Unix(),
+		})
+		if err != nil {
+			switch {
+			case errors.Is(err, store.ErrDisallowedScheme):
+				return nil, nil, errors.New("href must use http://, https://, or mailto:")
+			case errors.Is(err, store.ErrDuplicateLink):
+				return nil, nil, fmt.Errorf("a link with href %q already exists", args.Href)
 			}
-			removed, err := d.Store.RemoveLink(int64(id))
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if !removed {
-				return mcp.NewToolResultError(fmt.Sprintf(
-					"no manual link with id %d (RSS-imported links can't be removed; the next poll would re-import them)", id)), nil
-			}
-			if err := d.Engine.Rebuild(); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]any{"id": id, "status": "removed"})), nil
-		},
-	)
+			return nil, nil, err
+		}
+		if err := d.Engine.Rebuild(); err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(map[string]int64{"id": id})
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "remove_link",
+		Description: "Remove a manual link by id.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args removeLinkArgs) (*mcp.CallToolResult, any, error) {
+		if args.ID <= 0 {
+			return nil, nil, errors.New("invalid id")
+		}
+		removed, err := d.Store.RemoveLink(args.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !removed {
+			return nil, nil, fmt.Errorf(
+				"no manual link with id %d (RSS-imported links can't be removed; the next poll would re-import them)", args.ID)
+		}
+		if err := d.Engine.Rebuild(); err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(map[string]any{"id": args.ID, "status": "removed"})
+	})
 }
 
 // ---------------------------------------------------------------------------
 // Site config tools
 // ---------------------------------------------------------------------------
 
-func registerSiteTools(srv *mcpserver.MCPServer, d *Deps) {
-	srv.AddTool(
-		mcp.NewTool("get_site",
-			mcp.WithDescription("Return the full site.yml config (title, author, bio, nav, social, rss_feeds, footer_left)."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return mcp.NewToolResultText(jsonMust(d.Site())), nil
-		},
-	)
+// siteSectionArgs carries one site.yml section verbatim. The element shape
+// differs per section (strings for bio, objects for the rest), so the schema
+// stays deliberately open and the value is re-marshalled straight through to
+// the same core the REST API uses.
+type siteSectionArgs struct {
+	Value []any `json:"value" jsonschema:"New value for the section."`
+}
+
+func registerSiteTools(srv *mcp.Server, d *Deps) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_site",
+		Description: "Return the full site.yml config (title, author, bio, nav, social, rss_feeds, footer_left).",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		return jsonResult(d.Site())
+	})
 
 	// update_bio / update_nav / update_social / update_rss_feeds each take a
 	// single JSON array argument matching the corresponding site.yml section.
@@ -280,29 +304,20 @@ func registerSiteTools(srv *mcpserver.MCPServer, d *Deps) {
 		{"update_social", "social", "Replace the social links (array of {label, href, icon})."},
 		{"update_rss_feeds", "rss_feeds", "Replace the inbound RSS feeds (array of {url, label, enabled})."},
 	} {
-		// Capture loop variables for the closure.
-		name, section, desc := def.name, def.section, def.desc
-		srv.AddTool(
-			mcp.NewTool(name,
-				mcp.WithDescription(desc+" Saves site.yml and rebuilds."),
-				mcp.WithArray("value", mcp.Required(), mcp.Description("New value for the section.")),
-			),
-			func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-				raw := req.GetRawArguments()
-				args, ok := raw.(map[string]any)
-				if !ok {
-					return mcp.NewToolResultError("expected a JSON object with a 'value' array"), nil
-				}
-				valueBytes, err := json.Marshal(args["value"])
-				if err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
-				}
-				if err := d.updateSiteSection(section, strings.NewReader(string(valueBytes))); err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("update %s failed (%d): %s", section, httpToStatus(err), err)), nil
-				}
-				return mcp.NewToolResultText(jsonMust(map[string]string{"section": section, "status": "updated"})), nil
-			},
-		)
+		section := def.section
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        def.name,
+			Description: def.desc + " Saves site.yml and rebuilds.",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, args siteSectionArgs) (*mcp.CallToolResult, any, error) {
+			valueBytes, err := json.Marshal(args.Value)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := d.updateSiteSection(section, strings.NewReader(string(valueBytes))); err != nil {
+				return nil, nil, fmt.Errorf("update %s failed (%d): %w", section, httpToStatus(err), err)
+			}
+			return jsonResult(map[string]string{"section": section, "status": "updated"})
+		})
 	}
 }
 
@@ -310,41 +325,35 @@ func registerSiteTools(srv *mcpserver.MCPServer, d *Deps) {
 // Ops tools
 // ---------------------------------------------------------------------------
 
-func registerOpsTools(srv *mcpserver.MCPServer, d *Deps) {
-	srv.AddTool(
-		mcp.NewTool("regenerate",
-			mcp.WithDescription("Force a full site rebuild (re-renders all pages, feeds, sitemap, and the search index)."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			if err := d.Engine.Rebuild(); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(map[string]string{"status": "ok"})), nil
-		},
-	)
+func registerOpsTools(srv *mcp.Server, d *Deps) {
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "regenerate",
+		Description: "Force a full site rebuild (re-renders all pages, feeds, sitemap, and the search index).",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		if err := d.Engine.Rebuild(); err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(map[string]string{"status": "ok"})
+	})
 
-	srv.AddTool(
-		mcp.NewTool("get_stats",
-			mcp.WithDescription("Return page-view stats: total, per-path, and per-day (30d)."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			s, err := d.Store.Stats()
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(jsonMust(s)), nil
-		},
-	)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_stats",
+		Description: "Return page-view stats: total, per-path, and per-day (30d).",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		s, err := d.Store.Stats()
+		if err != nil {
+			return nil, nil, err
+		}
+		return jsonResult(s)
+	})
 
-	srv.AddTool(
-		mcp.NewTool("refresh_feeds",
-			mcp.WithDescription("Poll all enabled RSS feeds and import new items."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			n := d.Poller.Poll(ctx, d.Site())
-			return mcp.NewToolResultText(jsonMust(map[string]int{"imported": n})), nil
-		},
-	)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "refresh_feeds",
+		Description: "Poll all enabled RSS feeds and import new items.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+		n := d.Poller.Poll(ctx, d.Site())
+		return jsonResult(map[string]int{"imported": n})
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -363,43 +372,21 @@ func artSummaries(arts []build.Article) []articleSummary {
 	return out
 }
 
-// rawArgs returns the tool call's argument object, or nil if it wasn't one.
-func rawArgs(req mcp.CallToolRequest) map[string]any {
-	m, _ := req.GetRawArguments().(map[string]any)
-	return m
+// orKeep returns the caller-supplied value, or fallback when the field was not
+// supplied at all.
+func orKeep[T any](p *T, fallback T) T {
+	if p == nil {
+		return fallback
+	}
+	return *p
 }
 
-// keepString returns the caller-supplied value for key, or fallback when the
-// key was not supplied at all.
-func keepString(args map[string]any, key, fallback string) string {
-	v, ok := args[key]
-	if !ok {
-		return fallback
-	}
-	s, ok := v.(string)
-	if !ok {
-		return fallback
-	}
-	return s
-}
-
-// keepStrings is keepString for a JSON array of strings.
-func keepStrings(args map[string]any, key string, fallback []string) []string {
-	v, ok := args[key]
-	if !ok {
-		return fallback
-	}
-	arr, ok := v.([]any)
-	if !ok {
-		return fallback
-	}
-	out := make([]string, 0, len(arr))
-	for _, item := range arr {
-		if s, ok := item.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
+// jsonResult packs v as the tool's text content, in the handler's return
+// shape. Every tool answers with pretty-printed JSON.
+func jsonResult(v any) (*mcp.CallToolResult, any, error) {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: jsonMust(v)}},
+	}, nil, nil
 }
 
 // jsonMust encodes v; a marshal failure is a programmer error and panics.

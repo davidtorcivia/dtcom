@@ -25,6 +25,13 @@ were reachable from the LAN, anything on the network could forge those
 headers to inflate view counts and walk past the login rate limiter.
 The two settings only make sense together.
 
+`DTCOM_TRUST_PROXY` also governs the `/mcp` endpoint's DNS-rebinding
+check. The MCP SDK rejects a request that arrives on a loopback listener
+carrying a non-loopback `Host` — which is precisely what every request
+through the tunnel looks like. Trusting the proxy waives that check;
+without the flag, MCP clients would get 403 here while the rest of the
+site kept working.
+
 The consequence is that there is no `http://192.168.1.131:8102` any more.
 Reach the site and `/admin` through the domain. To get a LAN-reachable
 instance back for testing, set `DTCOM_BIND=0.0.0.0` **and**

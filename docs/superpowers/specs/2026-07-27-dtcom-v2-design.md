@@ -240,7 +240,13 @@ session TTL 7 days, sliding renewal.
 
 Streamable HTTP transport (current MCP spec), so a remote LLM client connects
 over the tunnel. Bearer-token auth (token from `DTCOM_API_TOKEN`, shared with
-REST API). Built on `github.com/mark3labs/mcp-go`.
+REST API). Built on `github.com/modelcontextprotocol/go-sdk`.
+
+*Amended 2026-07-30:* the server was moved to the `2026-07-28` spec revision,
+which removed the `initialize` handshake and protocol-level sessions. The
+endpoint is now sessionless — each request carries its own protocol version in
+`_meta` — while older clients back to `2024-11-05` are still answered on the
+same URL. See decision 2 under Open items for why the library changed.
 
 Tools exposed:
 
@@ -349,7 +355,7 @@ agents can discover them.
 - `modernc.org/sqlite` — pure-Go SQLite, **no CGO** (clean Docker builds, FTS5 included)
 - `github.com/mmcdole/gofeed` — RSS parsing
 - `github.com/pquerna/otp` — TOTP
-- `github.com/mark3labs/mcp-go` — MCP server
+- `github.com/modelcontextprotocol/go-sdk` — MCP server
 - `gopkg.in/yaml.v3` — `site.yml` parsing
 - `golang.org/x/crypto/bcrypt` — password hashing
 - stdlib `net/http` (Go 1.22+ routing), `log/slog`, `html/template`
@@ -441,17 +447,20 @@ that fill the same DOM structure.
 1. **Custom links in SQLite** (not `content/links.yml`). Chosen because
    RSS-imported links are inherently dynamic and the API/MCP manage them.
    Easy to revisit.
-2. **MCP library** is `mark3labs/mcp-go`. Mature, maintained, supports the
-   Streamable HTTP transport. Could hand-roll if a dependency-free core is
-   desired.
+2. **MCP library** is `modelcontextprotocol/go-sdk` (*amended 2026-07-30*;
+   was `mark3labs/mcp-go`). The `2026-07-28` spec revision is a large enough
+   break — sessionless lifecycle, `server/discover`, standard request headers,
+   cacheable list results — that following it means following whichever library
+   the spec authors ship it in. `mark3labs/mcp-go` was still on `2025-11-25` at
+   v0.57.0 with no dated plan to move. Could hand-roll if a dependency-free
+   core is desired, but that is now considerably more work than it was.
 3. **WebP deferred** — no clean pure-Go encoder. Revisit if/when one ships.
 4. **pure-Go `modernc.org/sqlite`** chosen over CGO `mattn/go-sqlite3`
    for clean Docker builds. Marginal performance cost is irrelevant for a
    single-user site.
 5. **Go floor raised to 1.25.5** (was 1.22 in the original spec) because
-   `modernc.org/sqlite` v1.54+ and `mark3labs/mcp-go` v0.57+ both require
-   it. Dockerfile uses `golang:1.25-alpine`. No downside for a single-user
-   Docker deployment.
+   `modernc.org/sqlite` v1.54+ requires it. Dockerfile uses
+   `golang:1.25-alpine`. No downside for a single-user Docker deployment.
 
 ---
 
