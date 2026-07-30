@@ -148,4 +148,100 @@
       button.dataset.originalLabel = button.textContent;
     }
   });
+
+  // --- Chart tooltip ------------------------------------------------------
+  //
+  // The dashboard's bars carry their day and count in data-* attributes and a
+  // title, so pointing at one says something with scripting off too. This
+  // upgrades that to a readout that follows the cursor and does not wait for
+  // the browser's tooltip delay.
+  //
+  // One element, reused: a chart can be 90 columns wide and building a node
+  // per bar would be 90 nodes to keep in sync with nothing.
+
+  var tip = null;
+  var tipCol = null;
+
+  function chartTip() {
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.className = 'chart-tip';
+      tip.setAttribute('role', 'status');
+      tip.innerHTML = '<span class="chart-tip-count"></span> <span class="chart-tip-label"></span>';
+      document.body.appendChild(tip);
+    }
+    return tip;
+  }
+
+  function showTip(col) {
+    var t = chartTip();
+    var count = col.dataset.count || '0';
+    t.querySelector('.chart-tip-count').textContent = count === '1' ? '1 view' : count + ' views';
+    t.querySelector('.chart-tip-label').textContent = col.dataset.label || '';
+
+    // Anchored to the top of the bar rather than to the cursor, so the readout
+    // holds still while the pointer moves and sits where the value actually
+    // is — at the baseline for a day nobody visited, high up for a busy one.
+    var bar = col.querySelector('.chart-bar') || col;
+    var box = bar.getBoundingClientRect();
+    var x = box.left + box.width / 2;
+    // Keep it on screen: a tooltip over the first or last bar of a wide chart
+    // would otherwise hang off the edge.
+    var half = t.offsetWidth / 2;
+    if (half) {
+      x = Math.min(Math.max(x, half + 4), window.innerWidth - half - 4);
+    }
+    t.style.left = x + 'px';
+    t.style.top = (box.top - 6) + 'px';
+    t.classList.add('is-visible');
+
+    if (tipCol && tipCol !== col) {
+      tipCol.classList.remove('is-hot');
+    }
+    col.classList.add('is-hot');
+    tipCol = col;
+  }
+
+  function hideTip() {
+    if (tip) {
+      tip.classList.remove('is-visible');
+    }
+    if (tipCol) {
+      tipCol.classList.remove('is-hot');
+      tipCol = null;
+    }
+  }
+
+  document.addEventListener('pointermove', function (e) {
+    var col = e.target.closest ? e.target.closest('.chart-col') : null;
+    if (!col) {
+      if (tipCol) {
+        hideTip();
+      }
+      return;
+    }
+    if (col !== tipCol) {
+      showTip(col);
+    }
+  });
+
+  // Scrolling moves the bars out from under a tooltip pinned to the viewport.
+  window.addEventListener('scroll', hideTip, { passive: true });
+  window.addEventListener('blur', hideTip);
+
+  // Keyboard and touch: focus or tap a column to read it. The columns are
+  // given tabindex here rather than in the template so that a browser without
+  // scripting does not offer a tab stop that does nothing.
+  var charts = document.querySelectorAll('[data-chart] .chart-col');
+  for (var i = 0; i < charts.length; i++) {
+    charts[i].tabIndex = 0;
+  }
+  document.addEventListener('focusin', function (e) {
+    var col = e.target.closest ? e.target.closest('.chart-col') : null;
+    if (col) {
+      showTip(col);
+    } else {
+      hideTip();
+    }
+  });
 })();

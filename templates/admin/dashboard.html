@@ -1,4 +1,4 @@
-{{define "dashboard"}}{{$s := .Stats}}
+{{define "dashboard"}}
 {{template "admin-header" .}}
 <main class="admin-main">
 <div class="admin-header-row">
@@ -8,8 +8,12 @@
 
 <div class="stat-cards">
 <div class="stat-card">
-<span class="stat-value">{{$s.Total}}</span>
+<span class="stat-value">{{.Total}}</span>
 <span class="stat-label">Total views</span>
+</div>
+<div class="stat-card">
+<span class="stat-value">{{.Today}}</span>
+<span class="stat-label">Views today</span>
 </div>
 <div class="stat-card">
 <span class="stat-value">{{.PostCount}}</span>
@@ -19,42 +23,79 @@
 <span class="stat-value">{{.LinkCount}}</span>
 <span class="stat-label">Links</span>
 </div>
-<div class="stat-card">
-<span class="stat-value">{{.Today}}</span>
-<span class="stat-label">Views today</span>
 </div>
+
+{{/* The chart. Every column is a real span of time — the handler fills in the
+     days nobody visited — so the width of a gap means what it looks like it
+     means. The tooltip is progressive: data-* carries the numbers, admin.js
+     draws the panel, and the title attribute keeps it working without it. */}}
+<section class="panel">
+<div class="panel-head">
+<h3 class="panel-title">Views</h3>
+<nav class="range-tabs" aria-label="Chart range">
+{{range .ChartRanges}}<a href="{{.URL}}" class="range-tab{{if .Active}} is-active{{end}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+</nav>
 </div>
+<p class="panel-summary">
+<strong>{{.ChartTotal}}</strong> views over {{.ChartRange.Label | lower}}{{if .ChartPeak}} <span class="dot-sep">·</span>
+busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end}}
+</p>
+
+{{if .Chart}}
+<div class="chart" data-chart>
+<div class="chart-scale" aria-hidden="true">
+<span class="chart-scale-max">{{.ChartMax}}</span>
+<span class="chart-scale-mid">{{halfOf .ChartMax}}</span>
+<span class="chart-scale-min">0</span>
+</div>
+<ol class="chart-bars">
+{{range .Chart}}<li class="chart-col{{if not .Count}} is-empty{{end}}{{if .Tick}} is-tick{{end}}"
+  data-label="{{.Label}}" data-count="{{.Count}}" title="{{.Label}}: {{.Count}}">
+<span class="chart-bar" style="height:{{.Percent}}%"></span>
+<span class="admin-sr-only">{{.Label}}: {{.Count}}</span>
+</li>{{end}}
+</ol>
+</div>
+<div class="chart-axis" aria-hidden="true"><span>{{.ChartStart}}</span><span>{{.ChartEnd}}</span></div>
+{{else}}<p class="admin-empty">No views recorded yet. They start arriving once somebody reads a page.</p>{{end}}
+</section>
 
 <div class="stats-columns">
-<section class="stats-column">
-<h3 class="admin-h3">Most read</h3>
-{{if $s.ByPath}}<ul class="bar-list">
+<section class="panel stats-column">
+<div class="panel-head">
+<h3 class="panel-title">Most read</h3>
+<nav class="range-tabs" aria-label="Most read range">
+{{range .TopRanges}}<a href="{{.URL}}" class="range-tab{{if .Active}} is-active{{end}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+</div>
+<p class="panel-summary"><strong>{{.TopRangeSum}}</strong> views over {{.TopRange.Label | lower}}</p>
+{{if .TopPaths}}<ul class="bar-list">
 {{range .TopPaths}}<li>
 <span class="bar-label"><a href="{{.Path}}" target="_blank" rel="noopener">{{.Path}}</a></span>
-<span class="bar-track"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
-<span class="bar-value">{{.Count}}</span>
+<span class="bar-track" title="{{.Share}}% of views in this range"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
+<span class="bar-value">{{.Count}}<span class="bar-share">{{.Share}}%</span></span>
 </li>{{end}}
-</ul>{{else}}<p class="admin-empty">No views recorded yet.</p>{{end}}
+</ul>{{else}}<p class="admin-empty">Nothing read in this range.</p>{{end}}
 </section>
 
-<section class="stats-column">
-<h3 class="admin-h3">Last 30 days</h3>
-{{if .Days}}<div class="spark">
-{{range .Days}}<span class="spark-bar" style="height:{{.Percent}}%" title="{{.Day}}: {{.Count}}"><span class="admin-sr-only">{{.Day}}: {{.Count}}</span></span>{{end}}
+<section class="panel stats-column">
+<div class="panel-head">
+<h3 class="panel-title">Recent posts</h3>
+<a href="/admin/posts" class="panel-more">All posts →</a>
 </div>
-<div class="spark-axis"><span>{{.DayRangeStart}}</span><span>{{.DayRangeEnd}}</span></div>{{else}}<p class="admin-empty">No views recorded yet.</p>{{end}}
-</section>
-</div>
-
-<section class="admin-section">
-<h3 class="admin-h3">Recent posts</h3>
 <ul class="admin-list">
 {{range .Recent}}<li>
 <span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{end}}</span>
 <a class="admin-cancel" href="/posts/{{.Slug}}" target="_blank" rel="noopener">view</a>
 </li>{{else}}<li class="admin-empty">No posts yet. <a href="/admin/posts/new">Write the first one.</a></li>{{end}}
 </ul>
+{{if .AnalyticsOn}}<p class="admin-hint panel-foot">A third-party tracker is also running{{if .AnalyticsURL}} —
+<a href="{{.AnalyticsURL}}" target="_blank" rel="noopener">open its dashboard</a>{{end}}. The counts above are this
+site's own: one per page, per address, per day.</p>
+{{else}}<p class="admin-hint panel-foot">Counts are one per page, per address, per day, and exclude bots and your own
+logged-in visits. Add a third-party tracker on the <a href="/admin/site">Site</a> page for session-level detail.</p>{{end}}
 </section>
+</div>
 </main>
 {{template "admin-footer"}}
 {{end}}
