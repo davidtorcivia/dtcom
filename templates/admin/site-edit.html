@@ -33,6 +33,22 @@
 <option value="full"{{if $s.ShowLinkNotes}} selected{{end}}>Full — title with its summary line</option>
 <option value="minimal"{{if not $s.ShowLinkNotes}} selected{{end}}>Minimal — date :: title only</option>
 </select>
+
+<h3 class="admin-h3 admin-form-heading">Analytics</h3>
+<p class="admin-hint">An optional third-party tracker — Umami, Plausible, Fathom, GoatCounter. Leave the URL
+empty for none. The built-in view counter on the <a href="/admin">Dashboard</a> keeps running either way; it
+counts one view per page per address per day, which is a deliberately narrower number than a tracker's.</p>
+<label class="admin-label" for="s-analytics-script">Script URL</label>
+<input id="s-analytics-script" name="analytics_script" value="{{$s.Analytics.ScriptURL}}" class="admin-input"
+       placeholder="https://analytics.example.com/script.js" inputmode="url">
+<label class="admin-label" for="s-analytics-data">Attributes (one <code>name: value</code> per line)</label>
+<textarea id="s-analytics-data" name="analytics_data" class="admin-input admin-mono" rows="3"
+          placeholder="website-id: 0e1f…">{{range $k := $s.Analytics.DataKeys}}{{$k}}: {{index $s.Analytics.Data $k}}
+{{end}}</textarea>
+<p class="admin-hint">Rendered as <code>data-*</code> on the script tag: Umami wants <code>website-id</code>,
+Plausible <code>domain</code>, Fathom <code>site</code>. The script's origin is added to the site's
+Content-Security-Policy automatically — without that the browser would refuse to run it.</p>
+
 <p class="admin-hint">RSS feeds are managed on the <a href="/admin/links">Links</a> page. Nav and social links are below.</p>
 <div class="admin-actions">
 <button type="submit" class="admin-btn">Save</button>

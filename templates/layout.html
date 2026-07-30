@@ -22,6 +22,12 @@
   {{else}}<link rel="icon" href="{{asset "/static/favicon.svg"}}" type="image/svg+xml">{{end}}
   <link rel="alternate" type="application/rss+xml" title="{{.Site.Title}}" href="/feed.xml">
   <script src="{{asset "/static/app.js"}}" defer></script>
+  {{/* The optional third-party tracker from site.yml. Built in Go rather than
+       here because the data-* attribute names are configuration, and a template
+       can escape an attribute's value but cannot template its name. Emits
+       nothing when none is configured; the origin is also added to script-src
+       by the server, or the browser would refuse to run it. */}}
+  {{analyticsTag .Site}}
 {{end}}
 
 {{define "site-header"}}

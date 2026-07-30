@@ -112,6 +112,9 @@ func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 			}
 			return ""
 		},
+		// analyticsTag renders the configured tracker's <script> tag, or
+		// nothing at all when none is configured.
+		"analyticsTag": analyticsTag,
 		// readingTime estimates minutes to read a post body, at the ~200 wpm
 		// figure typical for prose.
 		"readingTime": func(body string) int {
@@ -122,6 +125,37 @@ func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 			return max(1, (words+199)/200)
 		},
 	}
+}
+
+// analyticsTag builds the analytics <script> tag from site.yml.
+//
+// Assembled in Go rather than in the template because the data-* attribute
+// names are configuration: html/template will escape an attribute's value for
+// you, but it cannot template an attribute *name* at all. Building the tag here
+// means the name goes through ValidateAnalytics's character check and the value
+// through the same escaper the templates use.
+//
+// A URL that is not http(s) yields nothing. Save-time validation already
+// refuses one, but a site.yml edited by hand never passed through that, and the
+// tag this returns is exempt from escaping by construction.
+func analyticsTag(site *siteconfig.Config) template.HTML {
+	if site == nil || !site.Analytics.Enabled() || site.Analytics.Origin() == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<script defer src="`)
+	template.HTMLEscape(&b, []byte(site.Analytics.ScriptURL))
+	b.WriteString(`"`)
+	for _, k := range site.Analytics.DataKeys() {
+		if !siteconfig.ValidAttrName(k) {
+			continue
+		}
+		b.WriteString(` data-` + k + `="`)
+		template.HTMLEscape(&b, []byte(site.Analytics.Data[k]))
+		b.WriteString(`"`)
+	}
+	b.WriteString(`></script>`)
+	return template.HTML(b.String())
 }
 
 // socialIcons maps a site.yml social icon name to its inline SVG markup.

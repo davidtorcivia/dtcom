@@ -52,6 +52,10 @@ type Deps struct {
 	// tokenTouched throttles last-used writes for API tokens; see touchToken.
 	tokenTouchMu sync.Mutex
 	tokenTouched map[int64]time.Time
+
+	// csp memoises the Content-Security-Policy, which varies only with the
+	// analytics origin configured in site.yml; see securityHeaders.
+	csp cspCache
 }
 
 // New wires every route group and wraps the mux in the shared middleware:
@@ -95,5 +99,5 @@ func New(d *Deps) http.Handler {
 	registerAdmin(mux, d)
 	registerAPI(mux, d)
 	registerMCP(mux, d)
-	return securityHeaders(d.logging(recoverer(compression(mux))))
+	return d.securityHeaders(d.logging(recoverer(compression(mux))))
 }
