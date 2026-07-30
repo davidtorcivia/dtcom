@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,6 +67,44 @@ func TestSnapshotAndReplace(t *testing.T) {
 	// Still writable: the pool was genuinely reopened, not left closed.
 	if _, err := s.AddLink(Link{Label: "later", Href: "https://example.com/c", SortDate: time.Now().Unix()}); err != nil {
 		t.Fatalf("write after replace: %v", err)
+	}
+}
+
+// TestReplaceWithRejectsGarbage covers the failure that used to be
+// unrecoverable: a replacement that is not a database must be turned away with
+// the live database untouched and the store still serving. Before the candidate
+// was verified up front, this closed the pool, overwrote the live file, and left
+// every later query answering "sql: database is closed" until a restart.
+func TestReplaceWithRejectsGarbage(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "live.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	if _, err := s.AddLink(Link{Label: "keep me", Href: "https://example.com/a", SortDate: time.Now().Unix()}); err != nil {
+		t.Fatal(err)
+	}
+
+	junk := filepath.Join(dir, "not-a-database")
+	if err := os.WriteFile(junk, []byte("this is not a sqlite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceWith(junk); err == nil {
+		t.Fatal("ReplaceWith accepted a file that is not a database")
+	}
+
+	// The store still works, and still holds what it held.
+	links, err := s.ListLinks(10)
+	if err != nil {
+		t.Fatalf("store unusable after a rejected replacement: %v", err)
+	}
+	if len(links) != 1 || links[0].Label != "keep me" {
+		t.Errorf("live data changed by a rejected replacement: %+v", links)
+	}
+	if _, err := s.AddLink(Link{Label: "still writable", Href: "https://example.com/b", SortDate: time.Now().Unix()}); err != nil {
+		t.Errorf("store not writable after a rejected replacement: %v", err)
 	}
 }
 

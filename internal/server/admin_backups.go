@@ -168,6 +168,12 @@ func (d *Deps) adminBackupRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 
+	// Bounded and parsed the same way every other admin form is, rather than
+	// leaving it to FormValue to read an unbounded body on its own.
+	if !parseAdminForm(w, r) {
+		return
+	}
+
 	// The typed confirmation is checked here rather than in the browser. A
 	// dialog can be dismissed by a script or a stray Enter; this cannot.
 	list, err := d.Backups.List()
