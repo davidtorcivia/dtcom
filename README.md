@@ -112,7 +112,7 @@ Two kinds of bearer credential authenticate the REST API and MCP server, and bot
 
 ## MCP integration
 
-The `/mcp` endpoint speaks MCP over Streamable HTTP with bearer-token auth (the same tokens the REST API uses). Point any MCP client at it:
+The `/mcp` endpoint speaks MCP over Streamable HTTP with bearer-token auth (the same tokens the REST API uses), at the `2026-07-28` revision of the spec. Point any MCP client at it:
 
 ```json
 {
@@ -139,6 +139,10 @@ Seventeen tools are exposed, grouped by what they touch:
 `/admin/integrations` renders the config block above with your actual URL and a token, ready to copy.
 
 Every write tool saves to disk and triggers a rebuild, so a `create_article` call is fully published by the time it returns. `update_article` distinguishes an omitted field from an empty one — omit a key to keep it, pass `""` to clear it.
+
+**Protocol version.** The server runs the `2026-07-28` revision, which dropped the `initialize` handshake and protocol-level sessions: each request stands alone and carries its own protocol version in `_meta`, and no `Mcp-Session-Id` is issued. Clients still speaking `2025-11-25` or earlier are answered on the same endpoint — the SDK keeps the old handshake working — so nothing needs upgrading in lockstep. Two consequences worth knowing: `GET /mcp` returns 405, because there is no standing server-to-client stream to open, and a dropped response stream loses that request outright, so the client must retry it with a fresh id rather than resume.
+
+Behind a reverse proxy or tunnel, set `DTCOM_TRUST_PROXY=true` (see below). The MCP handler applies DNS-rebinding protection to requests that arrive on a loopback listener bearing a non-loopback `Host` — the exact shape of a legitimate proxied request — and that flag is what tells it a proxy really is in front.
 
 ## REST API
 
