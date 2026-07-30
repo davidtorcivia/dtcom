@@ -261,6 +261,26 @@ func (g *gzipResponseWriter) Write(b []byte) (int, error) {
 
 func (g *gzipResponseWriter) Unwrap() http.ResponseWriter { return g.ResponseWriter }
 
+// FlushError pushes the compressor's buffer out before flushing the connection.
+//
+// http.ResponseController walks the Unwrap chain, so without this a streaming
+// handler's flush would reach the real writer directly and skip whatever the
+// gzip writer is still holding — the bytes would arrive out of order, or not at
+// all until the response ended. The MCP endpoint streams (its SSE responses are
+// not a compressible type, so it takes the second branch), and any future
+// streaming HTML or JSON would take the first.
+func (g *gzipResponseWriter) FlushError() error {
+	if !g.headerDone {
+		g.WriteHeader(http.StatusOK)
+	}
+	if g.gz != nil {
+		if err := g.gz.Flush(); err != nil {
+			return err
+		}
+	}
+	return http.NewResponseController(g.ResponseWriter).Flush()
+}
+
 func (g *gzipResponseWriter) Close() {
 	if g.gz != nil {
 		_ = g.gz.Close()

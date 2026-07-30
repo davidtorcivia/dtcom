@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"davidtorcivia.com/dtcom/internal/store"
 )
@@ -120,7 +121,12 @@ func (d *Deps) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query().Get("q")
 	if len(q) > maxSearchQuery {
+		// Cut back to a rune boundary. The cap is in bytes, and slicing one
+		// mid-character hands FTS5 a half-encoded rune to tokenize.
 		q = q[:maxSearchQuery]
+		for len(q) > 0 && !utf8.ValidString(q) {
+			q = q[:len(q)-1]
+		}
 	}
 	hits, err := d.Store.SearchArticles(q, 20)
 	if err != nil {

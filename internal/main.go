@@ -243,9 +243,6 @@ func run() error {
 	return nil
 }
 
-// watchLoop coalesces filesystem events and rebuilds once the burst settles.
-// The timer is only armed while there is pending work, so an idle site does no
-// periodic wakeups at all.
 // backupLoop takes a scheduled archive whenever the newest one is older than
 // the configured interval, then prunes to the retention policy.
 //
@@ -308,6 +305,9 @@ func backupDue(svc *backup.Service) (bool, error) {
 	return true, nil
 }
 
+// watchLoop coalesces filesystem events and rebuilds once the burst settles.
+// The timer is only armed while there is pending work, so an idle site does no
+// periodic wakeups at all.
 func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) {
 	timer := time.NewTimer(rebuildDebounce)
 	if !timer.Stop() {

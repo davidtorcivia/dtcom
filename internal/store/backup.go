@@ -109,18 +109,28 @@ func escapeSQLString(s string) string {
 
 // ReplaceWith swaps the live database for the file at path.
 //
-// The pool is closed first, which is what makes this safe: an open SQLite
-// connection holds the old file by descriptor, so replacing the file underneath
-// it would leave the process writing to a database nobody can see and reading
-// one that no longer exists. Close waits for queries already in flight; queries
-// that arrive during the swap fail rather than being served wrong, and the
-// window is a file rename wide.
+// The pool is closed before the swap, which is what makes the swap itself safe:
+// an open SQLite connection holds the old file by descriptor, so replacing the
+// file underneath it would leave the process writing to a database nobody can
+// see and reading one that no longer exists. Close waits for queries already in
+// flight; queries that arrive during the swap fail rather than being served
+// wrong, and the window is a file rename wide.
+//
+// The candidate is opened and migrated first, while the live database is still
+// running. A file that is not a database, or one this build cannot migrate, is
+// then rejected with nothing touched — the alternative, finding out after the
+// live pool was closed and the live file overwritten, destroyed the database it
+// was replacing and left the process answering "sql: database is closed" to
+// every query until a restart.
 //
 // The write-ahead log and shared-memory files are removed along with the old
 // database. They belong to it, and leaving them beside a different database is
 // how SQLite is handed a log of changes to pages that are not there.
 func (s *Store) ReplaceWith(path string) error {
 	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("replacement database: %w", err)
+	}
+	if err := verifyDatabase(path); err != nil {
 		return fmt.Errorf("replacement database: %w", err)
 	}
 
@@ -130,29 +140,63 @@ func (s *Store) ReplaceWith(path string) error {
 	if err := s.db.Close(); err != nil {
 		return fmt.Errorf("close before replace: %w", err)
 	}
+	// Past this point the pool is closed, so every failure has to leave a
+	// working one behind — whichever database ends up at s.path — or the
+	// process is finished until it is restarted.
+	failed := func(cause error) error {
+		db, err := openDB(s.path)
+		if err != nil {
+			return fmt.Errorf("%w (and the database could not be reopened: %v)", cause, err)
+		}
+		s.db = db
+		return cause
+	}
+
 	for _, suffix := range []string{"-wal", "-shm"} {
 		if err := os.Remove(s.path + suffix); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", s.path+suffix, err)
+			return failed(fmt.Errorf("remove %s: %w", s.path+suffix, err))
 		}
 	}
 	if err := os.Rename(path, s.path); err != nil {
 		// A rename across filesystems fails; fall back to a copy so a temp
 		// directory on another mount still works.
 		if err := copyFile(path, s.path); err != nil {
-			return fmt.Errorf("install replacement database: %w", err)
+			return failed(fmt.Errorf("install replacement database: %w", err))
 		}
 		_ = os.Remove(path)
 	}
 
 	db, err := openDB(s.path)
 	if err != nil {
+		// The file was opened successfully minutes ago and has only been moved
+		// since, so this means the disk itself has gone. There is nothing left
+		// to reopen.
 		return fmt.Errorf("reopen after replace: %w", err)
 	}
 	s.db = db
-	// Migrations run against whatever came out of the archive, so a backup
-	// taken before a schema change still opens.
+	// Idempotent, and the copyFile path above installs bytes this process has
+	// not migrated in place.
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate after replace: %w", err)
+	}
+	return nil
+}
+
+// verifyDatabase opens path as a database and brings it up to the current
+// schema, through a pool of its own that is closed again straight away.
+//
+// Both halves matter: opening proves the file is a database at all, and
+// migrating proves an archive taken before a schema change can be brought
+// forward — which is the check that used to happen after the live database had
+// already been overwritten.
+func verifyDatabase(path string) error {
+	db, err := openDB(path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.Exec(schema); err != nil {
+		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
 }
