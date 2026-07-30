@@ -103,6 +103,23 @@ Restoring is on the same page, behind typing the archive's date, and takes a fre
 
 The canonical URL is the one exception: `DTCOM_BASE_URL` wins over `site.yml`'s `base_url`, so the feed, sitemap, and OG tags can't disagree with the deployment.
 
+### Analytics
+
+An optional third-party tracker, set on the admin Site page or in `site.yml` directly. Umami, Plausible, Fathom and GoatCounter are all one script tag with some `data-*` attributes, so that is what the config models rather than a list of providers:
+
+```yaml
+analytics:
+  script_url: https://analytics.example.com/script.js
+  data:
+    website-id: 0e1f…
+```
+
+That renders `<script defer src="…" data-website-id="0e1f…"></script>` into every public page. Two things happen for you. The script's origin is added to the site's `script-src` and `connect-src` — the policy is otherwise `'self'`, so without that the browser would refuse to run the tag and the tracker would record nothing while looking correctly configured. And `/admin` keeps the strict policy regardless: the tag only ever goes on public pages, so there is no reason to let third-party script run on the authenticated surface.
+
+A `script_url` that isn't `http(s)` is refused on save, as is an attribute name containing anything but letters, digits and dashes — that name is written straight into the tag and, unlike a value, cannot be escaped after the fact.
+
+The built-in view counter keeps running alongside it. They are not measuring the same thing: this one counts one view per page, per address, per day, excludes bots and your own logged-in reads, and stores only a keyed hash of the address. A tracker sees sessions and referrers. The dashboard says which numbers it is showing.
+
 ## API tokens
 
 Two kinds of bearer credential authenticate the REST API and MCP server, and both are accepted everywhere:

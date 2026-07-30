@@ -538,11 +538,18 @@ func (d *Deps) adminSiteEdit(w http.ResponseWriter, r *http.Request) {
 // favicon upload posts here, so it needs a way to report a rejected file
 // without losing the rest of the page.
 func (d *Deps) renderSiteEdit(w http.ResponseWriter, errMsg string) {
+	d.renderSiteEditWith(w, d.Site(), errMsg)
+}
+
+// renderSiteEditWith draws the page from a given config rather than the live
+// one, so a save rejected by validation comes back with what was typed still in
+// the fields instead of silently reverting to what is on disk.
+func (d *Deps) renderSiteEditWith(w http.ResponseWriter, site *siteconfig.Config, errMsg string) {
 	if !d.adminReady(w) {
 		return
 	}
 	data := map[string]any{
-		"Site": d.Site(),
+		"Site": site,
 		// Offered as a dropdown in the social-link form: an unknown icon
 		// renders as nothing, so free text would let a typo produce an
 		// invisible link.
@@ -582,6 +589,18 @@ func (d *Deps) adminSiteSave(w http.ResponseWriter, r *http.Request) {
 	} else {
 		site.LinksStyle = siteconfig.LinksStyleFull
 	}
+	analytics := siteconfig.Analytics{
+		ScriptURL: strings.TrimSpace(r.FormValue("analytics_script")),
+		Data:      parseAttrLines(r.FormValue("analytics_data")),
+	}
+	// Refused rather than saved-and-ignored: a tracker that silently does not
+	// load looks identical to one that is working but has no visitors, and this
+	// URL also widens the site's script-src.
+	site.Analytics = analytics
+	if err := siteconfig.ValidateAnalytics(analytics); err != nil {
+		d.renderSiteEditWith(w, site, err.Error())
+		return
+	}
 	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -603,6 +622,35 @@ func (d *Deps) adminRegenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// parseAttrLines reads a textarea of "name: value" lines into a map, for the
+// analytics data-* attributes.
+//
+// One per line with the first colon separating them, so a value containing a
+// colon (a URL, most likely) needs no escaping. Blank lines and lines without a
+// colon are dropped rather than rejected: the field is free text and a stray
+// newline should not fail a save.
+func parseAttrLines(s string) map[string]string {
+	out := map[string]string{}
+	for _, line := range splitLines(s) {
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		// "data-website-id" and "website-id" both mean the same thing to
+		// somebody pasting from a provider's docs.
+		name = strings.TrimPrefix(name, "data-")
+		if name == "" {
+			continue
+		}
+		out[name] = strings.TrimSpace(value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // splitLines breaks a textarea blob into trimmed non-empty lines. Used for the

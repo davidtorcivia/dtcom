@@ -72,16 +72,67 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"frame-ancestors 'none'"
 
 // securityHeaders applies the response headers every route should carry.
-func securityHeaders(next http.Handler) http.Handler {
+//
+// The policy is the strict constant above unless site.yml configures an
+// analytics script, in which case that one origin is added to script-src (to
+// load the tag) and connect-src (to let it report back). Nothing else is
+// relaxed, and /admin never is: the tracker is only ever injected into public
+// pages, so widening the policy on the authenticated surface would buy nothing
+// and cost the guarantee that an admin page runs only its own code.
+func (d *Deps) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("Content-Security-Policy", d.policyFor(r))
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// policyFor returns the Content-Security-Policy for one request.
+func (d *Deps) policyFor(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, "/admin") {
+		return contentSecurityPolicy
+	}
+	site := d.Site()
+	if site == nil {
+		return contentSecurityPolicy
+	}
+	return d.csp.policy(site.Analytics.Origin())
+}
+
+// cspCache memoises the policy string for the configured analytics origin.
+//
+// Built once per origin rather than per request: this header goes out on every
+// response including each static asset, and the origin changes only when
+// site.yml is saved.
+type cspCache struct {
+	mu     sync.RWMutex
+	origin string
+	cached string
+}
+
+func (c *cspCache) policy(origin string) string {
+	if origin == "" {
+		return contentSecurityPolicy
+	}
+	c.mu.RLock()
+	if c.origin == origin {
+		p := c.cached
+		c.mu.RUnlock()
+		return p
+	}
+	c.mu.RUnlock()
+
+	built := strings.Replace(contentSecurityPolicy, "script-src 'self'", "script-src 'self' "+origin, 1)
+	built = strings.Replace(built, "connect-src 'self'", "connect-src 'self' "+origin, 1)
+
+	c.mu.Lock()
+	c.origin, c.cached = origin, built
+	c.mu.Unlock()
+	return built
 }
 
 // ---------------------------------------------------------------------------

@@ -84,6 +84,10 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
   color: var(--text-muted);
 }
 
+/* A subheading inside a long form, separating one group of fields from the
+   next without breaking them into separate <form>s. */
+.admin-form-heading { margin-top: 2rem; }
+
 .admin-checkbox {
   display: flex;
   align-items: center;
