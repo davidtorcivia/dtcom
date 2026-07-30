@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,4 +185,122 @@ func TestMCPUpdateArticleOmittedVsEmpty(t *testing.T) {
 
 func containsStr(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
+}
+
+// TestMCPToolAnnotations pins what each tool claims to do to the site. A client
+// reads these to decide what it can call freely and what it should ask about
+// first, and both destructiveHint and openWorldHint default to true when
+// absent — so an unannotated tool is not neutral, it is alarming.
+func TestMCPToolAnnotations(t *testing.T) {
+	d := newTestDeps(t)
+
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/list"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	// The response is an SSE frame wrapping the JSON-RPC result.
+	var listed struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			Annotations *struct {
+				Title           string `json:"title"`
+				ReadOnlyHint    bool   `json:"readOnlyHint"`
+				DestructiveHint *bool  `json:"destructiveHint"`
+				IdempotentHint  bool   `json:"idempotentHint"`
+				OpenWorldHint   *bool  `json:"openWorldHint"`
+			} `json:"annotations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(jsonRPCResult(t, rec.Body.String()), &listed); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	byName := map[string]int{}
+	for i, tool := range listed.Tools {
+		byName[tool.Name] = i
+		if tool.Annotations == nil {
+			t.Errorf("tool %q has no annotations, so it reads as destructive and open-world", tool.Name)
+			continue
+		}
+		if tool.Annotations.Title == "" {
+			t.Errorf("tool %q has no display title", tool.Name)
+		}
+	}
+
+	readOnly := []string{"list_articles", "get_article", "search_articles", "list_links", "get_site", "get_stats"}
+	for _, name := range readOnly {
+		a := listed.Tools[byName[name]].Annotations
+		if a == nil || !a.ReadOnlyHint {
+			t.Errorf("%s is not marked read-only", name)
+		}
+	}
+
+	destructive := []string{"delete_article", "remove_link"}
+	for _, name := range destructive {
+		a := listed.Tools[byName[name]].Annotations
+		if a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
+			t.Errorf("%s is not marked destructive", name)
+		}
+	}
+
+	// Everything that writes but takes nothing away must say so explicitly,
+	// or the default carries it into the destructive pile.
+	safeWrites := []string{"create_article", "update_article", "add_link", "regenerate",
+		"update_bio", "update_nav", "update_social", "update_rss_feeds"}
+	for _, name := range safeWrites {
+		a := listed.Tools[byName[name]].Annotations
+		if a == nil || a.DestructiveHint == nil || *a.DestructiveHint {
+			t.Errorf("%s is not marked non-destructive", name)
+		}
+		if a != nil && a.ReadOnlyHint {
+			t.Errorf("%s writes but claims to be read-only", name)
+		}
+	}
+	// Replacing a section twice leaves the same site; adding a post twice does not.
+	if a := listed.Tools[byName["update_bio"]].Annotations; a == nil || !a.IdempotentHint {
+		t.Error("update_bio replaces a value and should be idempotent")
+	}
+	if a := listed.Tools[byName["create_article"]].Annotations; a != nil && a.IdempotentHint {
+		t.Error("create_article adds a post and is not idempotent")
+	}
+
+	// refresh_feeds is the only tool that contacts anybody else.
+	for _, tool := range listed.Tools {
+		if tool.Annotations == nil || tool.Annotations.OpenWorldHint == nil {
+			continue
+		}
+		open := *tool.Annotations.OpenWorldHint
+		if want := tool.Name == "refresh_feeds"; open != want {
+			t.Errorf("%s openWorldHint = %v, want %v", tool.Name, open, want)
+		}
+	}
+}
+
+// jsonRPCResult pulls the "result" object out of a Streamable HTTP response,
+// which frames the JSON-RPC message as a server-sent event.
+func jsonRPCResult(t *testing.T, body string) []byte {
+	t.Helper()
+	for _, line := range strings.Split(body, "\n") {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data:")
+		if !ok {
+			continue
+		}
+		var msg struct {
+			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &msg); err != nil {
+			continue
+		}
+		if len(msg.Error) > 0 {
+			t.Fatalf("JSON-RPC error: %s", msg.Error)
+		}
+		if len(msg.Result) > 0 {
+			return msg.Result
+		}
+	}
+	t.Fatalf("no JSON-RPC result in response:\n%s", body)
+	return nil
 }
