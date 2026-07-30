@@ -65,6 +65,66 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 }
 
 // ---------------------------------------------------------------------------
+// Tool annotations
+//
+// What a tool does to the site, so a client can tell reading from writing and
+// writing from destroying — which is what it consults to decide whether a call
+// needs asking about first.
+//
+// These have to be stated. Both destructiveHint and openWorldHint default to
+// true when absent, so an unannotated server advertises every tool as capable
+// of wrecking something and of reaching out to the internet, and list_articles
+// looks exactly like delete_article. They are hints, not guarantees, and a
+// client is right not to trust them from a server it does not know; this one
+// is reached with a bearer token the operator issued.
+// ---------------------------------------------------------------------------
+
+func boolp(b bool) *bool { return &b }
+
+// reads annotates a tool that only looks at the site.
+func reads(title string) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{
+		Title:         title,
+		ReadOnlyHint:  true,
+		OpenWorldHint: boolp(false),
+	}
+}
+
+// writes annotates a tool that changes the site without taking anything away.
+// Idempotent means calling it twice with the same arguments leaves the site in
+// the same state as calling it once — true of the update_* tools, which
+// replace a value, and false of create_article and add_link, which add one.
+func writes(title string, idempotent bool) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{
+		Title:           title,
+		DestructiveHint: boolp(false),
+		IdempotentHint:  idempotent,
+		OpenWorldHint:   boolp(false),
+	}
+}
+
+// destroys annotates a tool that removes something. Idempotent by nature: a
+// second delete of the same slug finds nothing left to do. That is not a
+// reason to skip the confirmation — the first call is the irreversible one.
+func destroys(title string) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{
+		Title:           title,
+		DestructiveHint: boolp(true),
+		IdempotentHint:  true,
+		OpenWorldHint:   boolp(false),
+	}
+}
+
+// fetches annotates a tool that contacts somebody else's server.
+func fetches(title string) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{
+		Title:           title,
+		DestructiveHint: boolp(false),
+		OpenWorldHint:   boolp(true),
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Article tools
 // ---------------------------------------------------------------------------
 
@@ -106,6 +166,7 @@ type searchArticlesArgs struct {
 func registerArticleTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_articles",
+		Annotations: reads("List articles"),
 		Description: "List all articles with slug, title, date, draft status, and description.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		arts, err := build.LoadArticles(d.postsDir())
@@ -117,6 +178,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_article",
+		Annotations: reads("Read an article"),
 		Description: "Get a single article by slug: frontmatter + markdown body.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, any, error) {
 		a, err := d.findArticleBySlug(args.Slug)
@@ -134,6 +196,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "create_article",
+		Annotations: writes("Write a new article", false),
 		Description: "Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args createArticleArgs) (*mcp.CallToolResult, any, error) {
 		slug, status, err := d.createArticle(articleInput{
@@ -153,6 +216,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "update_article",
+		Annotations: writes("Edit an article", true),
 		Description: "Update an existing article identified by slug. Any field may be omitted to keep the current value.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateArticleArgs) (*mcp.CallToolResult, any, error) {
 		a, err := d.findArticleBySlug(args.Slug)
@@ -178,6 +242,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "delete_article",
+		Annotations: destroys("Delete an article"),
 		Description: "Delete an article by slug. Removes the .md file and rebuilds.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, any, error) {
 		status, err := d.deleteArticle(args.Slug)
@@ -189,6 +254,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "search_articles",
+		Annotations: reads("Search articles"),
 		Description: "Full-text search across article titles, bodies, and tags.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args searchArticlesArgs) (*mcp.CallToolResult, any, error) {
 		hits, err := d.Store.SearchArticles(args.Query, 20)
@@ -216,6 +282,7 @@ type removeLinkArgs struct {
 func registerLinkTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_links",
+		Annotations: reads("List links"),
 		Description: "List all links (manual + RSS-imported), newest first.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		links, err := d.Store.ListLinks(500)
@@ -227,6 +294,7 @@ func registerLinkTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "add_link",
+		Annotations: writes("Add a link", false),
 		Description: "Add a manual link and rebuild.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args addLinkArgs) (*mcp.CallToolResult, any, error) {
 		if args.Label == "" || args.Href == "" {
@@ -253,6 +321,7 @@ func registerLinkTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "remove_link",
+		Annotations: destroys("Remove a link"),
 		Description: "Remove a manual link by id.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args removeLinkArgs) (*mcp.CallToolResult, any, error) {
 		if args.ID <= 0 {
@@ -288,6 +357,7 @@ type siteSectionArgs struct {
 func registerSiteTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_site",
+		Annotations: reads("Read site config"),
 		Description: "Return the full site.yml config (title, author, bio, nav, social, rss_feeds, footer_left).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		return jsonResult(d.Site())
@@ -297,17 +367,18 @@ func registerSiteTools(srv *mcp.Server, d *Deps) {
 	// single JSON array argument matching the corresponding site.yml section.
 	// They route through the same updateSiteSection core used by the REST API.
 	for _, def := range []struct {
-		name, section, desc string
+		name, section, title, desc string
 	}{
-		{"update_bio", "bio", "Replace the bio paragraphs (array of strings)."},
-		{"update_nav", "nav", "Replace the nav links (array of {label, href})."},
-		{"update_social", "social", "Replace the social links (array of {label, href, icon})."},
-		{"update_rss_feeds", "rss_feeds", "Replace the inbound RSS feeds (array of {url, label, enabled})."},
+		{"update_bio", "bio", "Replace the bio", "Replace the bio paragraphs (array of strings)."},
+		{"update_nav", "nav", "Replace the nav links", "Replace the nav links (array of {label, href})."},
+		{"update_social", "social", "Replace the social links", "Replace the social links (array of {label, href, icon})."},
+		{"update_rss_feeds", "rss_feeds", "Replace the RSS feeds", "Replace the inbound RSS feeds (array of {url, label, enabled})."},
 	} {
 		section := def.section
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        def.name,
 			Description: def.desc + " Saves site.yml and rebuilds.",
+			Annotations: writes(def.title, true),
 		}, func(ctx context.Context, req *mcp.CallToolRequest, args siteSectionArgs) (*mcp.CallToolResult, any, error) {
 			valueBytes, err := json.Marshal(args.Value)
 			if err != nil {
@@ -328,6 +399,7 @@ func registerSiteTools(srv *mcp.Server, d *Deps) {
 func registerOpsTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "regenerate",
+		Annotations: writes("Rebuild the site", true),
 		Description: "Force a full site rebuild (re-renders all pages, feeds, sitemap, and the search index).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		if err := d.Engine.Rebuild(); err != nil {
@@ -338,6 +410,7 @@ func registerOpsTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_stats",
+		Annotations: reads("Read view stats"),
 		Description: "Return page-view stats: total, per-path, and per-day (30d).",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		s, err := d.Store.Stats()
@@ -349,6 +422,7 @@ func registerOpsTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "refresh_feeds",
+		Annotations: fetches("Poll RSS feeds"),
 		Description: "Poll all enabled RSS feeds and import new items.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 		n := d.Poller.Poll(ctx, d.Site())
