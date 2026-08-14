@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -200,16 +201,48 @@ func (e *Engine) prune(written *pathSet) error {
 	return nil
 }
 
-// writeFile writes one output file and records it as current.
+// writeFile writes one output file atomically and records it as current.
+// Temp file + rename: pages are served straight off this directory with no
+// coordination, so a truncate-then-write window would hand a concurrent
+// request a truncated page (and a truncated /og/ PNG would be cached
+// indefinitely by whoever fetched it in that window).
 func (e *Engine) writeFile(path string, data []byte, written *pathSet) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	// Byte-identical output keeps the old mtime, so conditional requests
+	// after a rebuild stay cheap 304s instead of full re-downloads.
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+		written.add(path)
+		return nil
+	}
+	if err := writeAtomic(path, data); err != nil {
 		return err
 	}
 	written.add(path)
 	return nil
+}
+
+// writeAtomic writes data to a temp file in the destination directory and
+// renames it into place.
+func writeAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
 
 // renderPage renders a named template to a file and records it as current.

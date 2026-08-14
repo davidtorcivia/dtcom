@@ -145,26 +145,20 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 	return "/images/" + name, nil
 }
 
-// renditionWork serializes rendition encoding across uploads. Encoding one
-// image at every width is several seconds of CPU; two at once on a small box
-// would make the site itself slow to answer, and there is nothing to gain from
-// racing them.
+// renditionWork serializes rendition encoding across uploads: encoding one
+// image at every width is several seconds of CPU, and racing two would slow
+// the site's own responses.
 var renditionWork sync.Mutex
 
-// generateRenditions cuts an uploaded image down to the responsive widths, in
-// the background.
-//
-// Off the request on purpose. Doing it inline tripled the time an upload took
-// — ten seconds for a large picture — and that is time the author spends
-// watching a spinner in the editor for work that changes nothing about the
-// answer they are waiting for: the master is already stored and already serves.
-//
-// The rebuild at the end is what puts the renditions into the pages. Until it
-// runs, a post referencing this image simply points at the master, which is
-// correct, just heavier — and if the process dies first, the next startup's
-// backfill finishes the job.
+// generateRenditions cuts an uploaded image down to the responsive widths,
+// in the background — the master is already stored and serves correctly
+// (just heavier); the renditions and the rebuild that references them can
+// follow. If the process dies first, the next startup's backfill finishes
+// the job.
 func (d *Deps) generateRenditions(name string) {
+	d.renditionWG.Add(1)
 	go func() {
+		defer d.renditionWG.Done()
 		renditionWork.Lock()
 		defer renditionWork.Unlock()
 

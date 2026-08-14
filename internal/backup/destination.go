@@ -2,24 +2,13 @@ package backup
 
 // Where archives are kept.
 //
-// One implementation today: a directory on disk. The interface exists because
-// there will be a second — an S3-compatible bucket, R2 in particular — and the
-// operations a remote one needs are exactly these four. Everything above this
-// file works in terms of names and readers, so adding that destination is a
-// matter of writing it and choosing it at startup, not of reworking the service.
+// One implementation today: a directory on disk. The interface models what a
+// remote destination (an S3-compatible bucket) needs, so adding one is a new
+// file plus a startup choice, not a rework.
 //
-// A note for whoever writes the remote one: Put takes a path rather than a
-// reader so that the local implementation can rename a finished temp file into
-// place instead of copying it through memory. A remote implementation opens
-// that path and streams it, which is what an uploader wants anyway — it needs
-// the length, and a retry needs to seek back to the start.
-//
-// Mirroring to two destinations at once (write here, upload there; delete both
-// when pruning) is the shape the eventual R2 work takes: a Destination that
-// holds two others and fans out, so the service above stays unaware. Fanning
-// out means deciding what a partial failure means — an archive that made it to
-// disk but not to the bucket is still a backup, and should be reported rather
-// than rolled back.
+// Put takes a path rather than a reader so the local implementation can
+// rename a finished temp file into place; a remote one opens the path and
+// streams it (it needs the length, and a retry needs to seek to the start).
 
 import (
 	"fmt"
@@ -213,11 +202,11 @@ func (l *Local) PutObject(key, srcPath string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	// A hard link costs no space and no time, and is safe because the images it
-	// points at are never rewritten in place — a new picture gets a new name.
-	// It also means the pooled copy survives the original being deleted, which
-	// is the entire point of having it.
+	// A hard link shares the source inode, so its mtime is the upload time —
+	// reset it so the sweep's grace period starts when the entry was pooled.
 	if err := os.Link(srcPath, dst); err == nil {
+		now := time.Now()
+		_ = os.Chtimes(dst, now, now)
 		return nil
 	}
 	// Different filesystem, or a filesystem without links.

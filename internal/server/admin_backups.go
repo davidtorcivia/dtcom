@@ -259,7 +259,9 @@ func (d *Deps) regenerateRenditions() {
 	if ix == nil {
 		return
 	}
+	d.renditionWG.Add(1)
 	go func() {
+		defer d.renditionWG.Done()
 		renditionWork.Lock()
 		defer renditionWork.Unlock()
 

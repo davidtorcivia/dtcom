@@ -28,12 +28,16 @@ type Article struct {
 
 // LoadArticles reads every *.md file in dir, parses frontmatter, and returns
 // them sorted by date desc. Drafts are included (filtered at render time).
+// Two files that collapse to the same slug are an error, not a silent
+// clobber: both would write the same rendered page and one post would become
+// unreachable.
 func LoadArticles(dir string) ([]Article, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("read posts dir: %w", err)
 	}
 	var arts []Article
+	seen := map[string]string{} // slug -> source file
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
@@ -49,13 +53,16 @@ func LoadArticles(dir string) ([]Article, error) {
 			return nil, fmt.Errorf("parse frontmatter %s: %w", e.Name(), err)
 		}
 		// Trim leading blank-line separator left behind after the closing
-		// frontmatter delimiter. Leading blank lines are insignificant in
-		// markdown; this yields a clean body starting at the first content line.
+		// frontmatter delimiter.
 		a.Body = strings.TrimLeft(string(rest), "\r\n")
 		a.SourcePath = path
 		if a.Slug == "" {
 			a.Slug = slugFromFilename(e.Name())
 		}
+		if prev, dup := seen[a.Slug]; dup {
+			return nil, fmt.Errorf("posts %s and %s share the slug %q", prev, e.Name(), a.Slug)
+		}
+		seen[a.Slug] = e.Name()
 		arts = append(arts, a)
 	}
 	sort.Slice(arts, func(i, j int) bool { return arts[i].Date.After(arts[j].Date) })

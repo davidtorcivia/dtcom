@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -151,7 +152,9 @@ func (d *Deps) adminFeedToggle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) adminFeedRefresh(w http.ResponseWriter, r *http.Request) {
-	imported := d.Poller.Poll(r.Context(), d.Site())
+	// Cancellation detached: a browser hang-up mid-poll must not
+	// abort a half-finished feed import.
+	imported := d.Poller.Poll(context.WithoutCancel(r.Context()), d.Site())
 	if imported > 0 {
 		if err := d.Engine.Rebuild(); err != nil {
 			slog.Error("rebuild after manual feed refresh", "err", err)

@@ -86,6 +86,13 @@ func (d *Deps) updateSiteSection(section string, body io.Reader) error {
 		if err := decodeJSONReader(body, &v); err != nil {
 			return statusErr(http.StatusBadRequest, err)
 		}
+		// Same check the admin form applies: the poller fetches these on a
+		// timer, so a non-http URL would be retried forever.
+		for _, f := range v {
+			if err := validFeedURL(f.URL); err != nil {
+				return statusErr(http.StatusBadRequest, fmt.Errorf("feed %q: %w", f.URL, err))
+			}
+		}
 		site.RSSFeeds = v
 	case "footer_left":
 		var v []string

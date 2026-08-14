@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +22,16 @@ import (
 // date like "../../etc" could escape the posts dir.
 var dateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-func validDate(s string) bool { return dateRe.MatchString(s) }
+// validDate also rejects values the regex accepts but the calendar does not
+// ("2026-99-99"): such a date writes a post file whose frontmatter then fails
+// to parse on every future rebuild.
+func validDate(s string) bool {
+	if !dateRe.MatchString(s) {
+		return false
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
 
 // registerAPI wires the bearer-token-authenticated REST API under /api/v1/.
 // The public /api/search and /api/track endpoints (no auth) are registered
@@ -105,7 +115,9 @@ func (d *Deps) apiRouter(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, s)
 	case p == "/api/v1/feeds/refresh" && m == http.MethodPost:
-		n := d.Poller.Poll(r.Context(), d.Site())
+		// Cancellation detached: a browser hang-up mid-poll must not
+		// abort a half-finished feed import.
+		n := d.Poller.Poll(context.WithoutCancel(r.Context()), d.Site())
 		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 	// images
 	case p == "/api/v1/images" && m == http.MethodPost:
@@ -255,6 +267,8 @@ func (d *Deps) findArticleBySlug(slug string) (*build.Article, error) {
 // createArticle writes a new post file and rebuilds. Returns
 // (slug, httpStatus, err) where status is 409 on a filename collision.
 func (d *Deps) createArticle(in articleInput) (string, int, error) {
+	d.postMu.Lock()
+	defer d.postMu.Unlock()
 	// ALWAYS sanitize: never trust caller-supplied slug/date verbatim, since
 	// both reach filepath.Join and could escape the posts dir (path traversal).
 	// in.Slug is run through slugify (dropping every char except [a-z0-9-]),
@@ -360,6 +374,8 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 
 // deleteArticle removes the post file matching slug and rebuilds.
 func (d *Deps) deleteArticle(slug string) (int, error) {
+	d.postMu.Lock()
+	defer d.postMu.Unlock()
 	a, err := d.findArticleBySlug(slug)
 	if err != nil {
 		return http.StatusInternalServerError, err
@@ -463,6 +479,9 @@ func (d *Deps) apiDeleteLink(w http.ResponseWriter, r *http.Request) {
 
 // apiUpdateSiteSection handles PUT /api/v1/site/{bio|nav|social|rss_feeds|footer_left}.
 func (d *Deps) apiUpdateSiteSection(w http.ResponseWriter, r *http.Request) {
+	// Same cap as every other JSON endpoint; decodeJSONReader itself is also
+	// used with already-bounded readers (the MCP tools).
+	r.Body = http.MaxBytesReader(nil, r.Body, maxJSONBody)
 	section := strings.TrimPrefix(r.URL.Path, "/api/v1/site/")
 	if err := d.updateSiteSection(section, r.Body); err != nil {
 		writeError(w, httpToStatus(err), err)

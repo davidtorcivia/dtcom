@@ -178,4 +178,3 @@ func TestNiceCeil(t *testing.T) {
 		}
 	}
 }
-

@@ -28,8 +28,7 @@ func (s *Store) ReindexArticles(arts []IndexedArticle) error {
 	if _, err := tx.Exec("DELETE FROM articles_fts"); err != nil {
 		return fmt.Errorf("clear fts: %w", err)
 	}
-	// One prepared statement reused across every row: a rebuild re-inserts the
-	// whole corpus, and re-planning the insert per article is pure overhead.
+	// One prepared statement reused across the whole corpus.
 	stmt, err := tx.Prepare(
 		"INSERT INTO articles_fts(slug, title, body, description, tags, tags_unindexed) VALUES(?,?,?,?,?,?)")
 	if err != nil {

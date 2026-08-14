@@ -2,16 +2,13 @@ package backup
 
 // Putting an archive back.
 //
-// The order matters, and it is: take a copy of what is there now, unpack the
-// archive somewhere harmless and check it over, and only then touch anything
-// live. Every failure before the last step leaves the site exactly as it was,
-// and the one after it is covered by the copy taken in the first.
+// Order: take a copy of the current state, unpack the archive somewhere
+// harmless and check it, and only then touch anything live. Every failure
+// before the last step leaves the site as it was; the one after is covered by
+// the copy.
 //
-// Directories are updated in place rather than swapped. The obvious
-// implementation — rename the old content/ aside, move the new one in — cannot
-// work here: content/ and data/ are bind mounts inside the container, and a
-// mount point cannot be renamed. So restore writes the archive's files over
-// what is there and removes what the archive does not have.
+// Directories are updated in place rather than swapped — content/ and data/
+// are bind mounts inside the container, and a mount point cannot be renamed.
 
 import (
 	"archive/tar"

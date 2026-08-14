@@ -278,17 +278,15 @@ func wrapText(face font.Face, s string, maxWidth, maxLines int) []string {
 	return lines
 }
 
-// ellipsise marks the last line as truncated, trimming characters until the
-// ellipsis fits.
+// ellipsise marks the last line as truncated, trimming runes until the
+// ellipsis fits. Rune-wise, not byte-wise: a byte cut can split a multi-byte
+// glyph and leave U+FFFD ahead of the "…".
 func ellipsise(face font.Face, lines []string, limit fixed.Int26_6) []string {
-	last := lines[len(lines)-1]
-	for last != "" {
-		if font.MeasureString(face, last+"…") <= limit {
-			break
-		}
-		last = strings.TrimRight(last[:len(last)-1], " ")
+	r := []rune(lines[len(lines)-1])
+	for len(r) > 0 && font.MeasureString(face, string(r)+"…") > limit {
+		r = r[:len(r)-1]
 	}
-	lines[len(lines)-1] = strings.TrimRight(last, " ") + "…"
+	lines[len(lines)-1] = strings.TrimRight(string(r), " ") + "…"
 	return lines
 }
 

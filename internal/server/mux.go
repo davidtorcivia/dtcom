@@ -57,6 +57,16 @@ type Deps struct {
 	// analytics origin configured in site.yml; see securityHeaders.
 	csp cspCache
 
+	// postMu serializes create/update/delete of post files. The engine's own
+	// mutex only serializes rebuilds; the check-then-write in createArticle
+	// (does this slug exist?) needs its own lock or two concurrent writers
+	// can both pass the check and clobber each other.
+	postMu sync.Mutex
+
+	// renditionWG tracks in-flight background rendition goroutines, so tests
+	// can drain them before TempDir cleanup; see generateRenditions.
+	renditionWG sync.WaitGroup
+
 	// mcpArticleRes is the set of article URIs currently registered as MCP
 	// resources, so a sync knows which ones to withdraw; see
 	// syncArticleResources.

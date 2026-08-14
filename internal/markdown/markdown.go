@@ -5,6 +5,7 @@ package markdown
 import (
 	"bytes"
 	"regexp"
+	"strconv"
 	"strings"
 
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -95,16 +96,7 @@ func RenderWith(src string, images ImageResolver) (string, error) {
 		return "", err
 	}
 	out := buf.String()
-	// ==highlight== → <mark>highlight</mark>
-	// (post-render regex replace — simpler and more robust than a custom
-	// goldmark inline parser. Safe because '==' does not otherwise appear
-	// in our rendered HTML.)
-	//
-	// ReplaceAll is applied twice: the pattern consumes the character after
-	// the closing "==", so two highlights separated by a single character
-	// would leave the second unmatched on a single pass.
-	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
-	out = highlightRe.ReplaceAllString(out, `${1}<mark>${2}</mark>${3}`)
+	out = applyHighlight(out)
 	out = captionImages(out)
 	// After captionImages, never before: figure detection matches paragraphs
 	// made only of <img> tags, and this pass may wrap them in <picture>.
@@ -114,24 +106,41 @@ func RenderWith(src string, images ImageResolver) (string, error) {
 
 var highlightRe = regexp.MustCompile(`(^|[^=])==([^=\n]+?)==([^=]|$)`)
 
+// codeOrMathRe matches regions where ==X== must stay literal: highlighted
+// code, inline code, and math spans. Comparison operators (`a == b`) are
+// everyday content inside all three.
+var codeOrMathRe = regexp.MustCompile(`(?s)<pre\b[^>]*>.*?</pre>|<code\b[^>]*>.*?</code>|<span class="math[^"]*">.*?</span>`)
+
+// applyHighlight turns ==highlight== into <mark> outside code and math.
+// Protected regions are swapped out for placeholders first — a naive global
+// replace wraps the halves of `a == b && c == d` inside <pre> in <mark> tags,
+// which both corrupts the code and, for two code spans on one line, produces
+// structurally broken markup.
+func applyHighlight(html string) string {
+	var saved []string
+	html = codeOrMathRe.ReplaceAllStringFunc(html, func(m string) string {
+		saved = append(saved, m)
+		return "\x00H" + strconv.Itoa(len(saved)-1) + "\x00"
+	})
+	// Applied twice: the pattern consumes the character after the closing
+	// "==", so two highlights separated by a single character would leave the
+	// second unmatched on a single pass.
+	html = highlightRe.ReplaceAllString(html, `${1}<mark>${2}</mark>${3}`)
+	html = highlightRe.ReplaceAllString(html, `${1}<mark>${2}</mark>${3}`)
+	for i, s := range saved {
+		html = strings.Replace(html, "\x00H"+strconv.Itoa(i)+"\x00", s, 1)
+	}
+	return html
+}
+
 // --- display-math normalisation ---------------------------------------------
 //
-// The math extension only handles a $$ block whose formula spans its own lines.
-// Two forms it gets wrong, both silently:
-//
-//   - a formula written entirely on one line, "$$x = 1$$", renders EMPTY: the
-//     content is dropped and only the delimiters survive.
-//   - a formula on a single line between its own $$ markers has each doubled
-//     backslash — LaTeX's row separator — collapsed to a single one, which
-//     changes what the formula means.
-//
-// Both are rewritten here into the form that works: $$ on their own lines, with
-// the formula broken at its row separators. LaTeX ignores the added newlines,
-// so this changes how the source is parsed, not what it means.
-//
-// The two fixes have to ship together. Fixing only the first would turn a
-// formula like $$a \\ b$$ from visibly empty into quietly wrong, and quietly
-// wrong is the worse failure.
+// The math extension mishandles two forms silently: a one-line $$x = 1$$
+// renders empty, and a single-line formula loses its doubled backslashes
+// (LaTeX row separators) to collapsing. Both are rewritten here into the form
+// that works: $$ on their own lines, rows split at \\. The two fixes ship
+// together — fixing only the first would turn visibly-empty into quietly
+// wrong, which is worse. Fenced code is skipped verbatim.
 
 var oneLineDisplayMath = regexp.MustCompile(`^([ \t]*)\$\$(.+?)\$\$[ \t]*$`)
 

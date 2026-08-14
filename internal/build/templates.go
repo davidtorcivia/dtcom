@@ -30,9 +30,9 @@ func (t *templateStore) Load(templatesDir string, funcs template.FuncMap) error 
 
 // render executes a named template to outPath.
 //
-// The output is buffered and written in one shot rather than streamed into an
-// os.Create'd file: a template error partway through would otherwise leave a
-// truncated page on disk, which the server would then happily serve.
+// The output is buffered and written atomically: a template error partway
+// through would otherwise leave a truncated page on disk, which the server
+// would then happily serve.
 func (t *templateStore) render(name, outPath string, data any) error {
 	if t.tmpl == nil {
 		return fmt.Errorf("templates not loaded")
@@ -44,7 +44,10 @@ func (t *templateStore) render(name, outPath string, data any) error {
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(outPath, buf.Bytes(), 0o644)
+	if old, err := os.ReadFile(outPath); err == nil && bytes.Equal(old, buf.Bytes()) {
+		return nil
+	}
+	return writeAtomic(outPath, buf.Bytes())
 }
 
 // helperFuncs returns the template function map used across all templates.

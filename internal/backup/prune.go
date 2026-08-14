@@ -1,19 +1,10 @@
 package backup
 
-// Retention.
-//
-// Keep the last N archives, and separately the last few taken just before a
-// restore.
-//
-// Counting archives rather than days is the right unit here because an archive
-// is only written when something actually changed — see Service.Create. So N is
-// not "N days of history", it is "the last N states the site was in", and a
-// week where nothing was published costs nothing and pushes nothing out.
-//
-// That is also why the old grandfather-father-son rotation is gone. Thinning
-// with age exists to stop a nightly run of identical copies from pushing the
-// last good one off the end; when identical copies are never written in the
-// first place, there is nothing to thin.
+// Retention: keep the last N archives plus the last few pre-restore safety
+// copies, counted separately. Counting archives rather than days is correct
+// because archives are only written on change — N is the last N states, not
+// the last N days, and identical copies never push anything out, so
+// grandfather-father-son thinning has nothing to thin.
 
 import (
 	"log/slog"

@@ -229,9 +229,11 @@ func TestClientIPIgnoresForwardedHeadersByDefault(t *testing.T) {
 	if got := d.deps.clientIP(req); got != "1.2.3.4" {
 		t.Errorf("clientIP = %q, want the forwarded address when proxies are trusted", got)
 	}
+	// Rightmost entry: a proxy that appends puts the address it saw last, so
+	// the client cannot forge its identity by prepending entries.
 	req.Header.Set("X-Forwarded-For", "5.6.7.8, 9.9.9.9")
-	if got := d.deps.clientIP(req); got != "5.6.7.8" {
-		t.Errorf("clientIP = %q, want the left-most forwarded entry", got)
+	if got := d.deps.clientIP(req); got != "9.9.9.9" {
+		t.Errorf("clientIP = %q, want the right-most forwarded entry", got)
 	}
 }
 
@@ -432,6 +434,8 @@ func TestImageUploadRoundTrip(t *testing.T) {
 	req.AddCookie(cookie)
 	rec = httptest.NewRecorder()
 	d.mux.ServeHTTP(rec, req)
+	// Drain the background rendition goroutine before TempDir cleanup.
+	d.deps.renditionWG.Wait()
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload = %d: %s", rec.Code, rec.Body.String())
 	}

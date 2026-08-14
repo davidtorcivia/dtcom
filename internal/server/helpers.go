@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -169,17 +170,18 @@ func isBot(ua string) bool {
 // hashIP returns a short keyed digest of a client address. Views are deduped
 // per (path, day, ipHash).
 //
-// The digest is keyed with the server's session secret rather than being a
-// bare SHA-256: the IPv4 space is small enough to enumerate, so an unkeyed
-// hash of an address is reversible by anyone who obtains the database. Keyed,
-// the stored value is meaningless without the secret.
+// A real HMAC, not secret-prefix SHA-256: the IPv4 space is small enough to
+// enumerate, so an unkeyed (or forgeable) hash of an address is reversible by
+// anyone who obtains the database. Keyed, the stored value is meaningless
+// without the secret.
 func (d *Deps) hashIP(addr string) string {
 	var key string
 	if d.Cfg != nil {
 		key = d.Cfg.SessionKey
 	}
-	h := sha256.Sum256([]byte(key + "|view|" + addr))
-	return hex.EncodeToString(h[:])[:16]
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write([]byte("view|" + addr))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 // todayUTC returns the current UTC day as YYYY-MM-DD, the granularity at which

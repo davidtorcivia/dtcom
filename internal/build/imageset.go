@@ -2,34 +2,19 @@ package build
 
 // Responsive renditions.
 //
-// A stored image is a master — up to MaxImageDim on its longest side, in the
-// format that keeps it honest. What a page loads is never that file. Beside
-// each master sit renditions at the widths in VariantWidths, named after it:
+// Beside each master (9f3c….png) sit renditions at the widths in
+// VariantWidths, named after it: 9f3c….w768.png (same format) and, for PNG
+// masters, 9f3c….w768.webp plus a 9f3c….webp master. The width lives in the
+// name so one srcset advertises every rendition and the directory listing
+// alone tells this package what exists. The hash prefix makes rendition URLs
+// as immutable as the master's, inheriting the year-long cache header.
 //
-//	9f3c….png            the master, opened by the lightbox
-//	9f3c….w768.png       a rendition, in the master's own format
-//	9f3c….w768.webp      the same rendition as lossless WebP
-//	9f3c….webp           the master as lossless WebP
-//
-// The name carries the width so a browser can be told about every rendition in
-// one srcset and pick for itself, and so this package can tell which files
-// exist by reading the directory rather than keeping a database of them. The
-// hash prefix is the master's content, so a rendition's URL is as immutable as
-// the master's and inherits the same year-long cache header.
-//
-// Which formats a master gets is decided by the master:
-//
-//   - PNG masters — anything with transparency, and anything the author chose
-//     to keep lossless — get PNG renditions and lossless WebP renditions. The
-//     WebP is the smaller of the two for every picture measured, by around a
-//     fifth, and is bit-identical to the PNG. Lossy WebP is not used at all: it
-//     resamples the colour beneath every partly-transparent pixel.
-//   - JPEG masters — photographs — get JPEG renditions and nothing else.
-//     Lossless WebP of a photograph runs about seven times the size of the
-//     JPEG, so offering it would be a pessimisation dressed as a modern format.
-//
-// SVG is skipped entirely. It is a drawing, not a raster: it is already every
-// size at once.
+// Format policy, decided by the master: PNG masters (transparency or author
+// choice) get PNG + lossless WebP renditions — lossless WebP is smaller,
+// bit-identical; lossy WebP is never used because it resamples the colour
+// under partly-transparent pixels. JPEG masters (photographs) get JPEG only —
+// lossless WebP of a photograph runs several times the JPEG's size. SVG is
+// skipped: already every size at once.
 
 import (
 	"bytes"
@@ -319,13 +304,16 @@ func (ix *ImageIndex) Resolve(src string) (*markdown.ImageInfo, bool) {
 
 // imageFileName pulls the file name out of a local /images/ URL, rejecting
 // anything that points elsewhere or tries to climb out of the directory.
+// Whitespace is rejected too: the srcset microsyntax splits candidates on
+// whitespace, so a space in a name would truncate every candidate list after
+// it.
 func imageFileName(src string) (string, bool) {
 	const prefix = "/images/"
 	if !strings.HasPrefix(src, prefix) {
 		return "", false
 	}
 	name := strings.TrimPrefix(src, prefix)
-	if name == "" || strings.ContainsAny(name, "/?#") || strings.Contains(name, "..") {
+	if name == "" || strings.ContainsAny(name, "/?# \t\r\n") || strings.Contains(name, "..") {
 		return "", false
 	}
 	return name, true

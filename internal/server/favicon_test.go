@@ -40,6 +40,8 @@ func multipartRequest(t *testing.T, path, field, filename string, body []byte) *
 }
 
 // adminUpload posts a multipart file to an admin route with a valid session.
+// Raster uploads spawn a background rendition goroutine; draining it here
+// keeps it from racing t.TempDir cleanup.
 func (d *testDeps) adminUpload(t *testing.T, path, field, filename string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	sess := httptest.NewRecorder()
@@ -50,6 +52,7 @@ func (d *testDeps) adminUpload(t *testing.T, path, field, filename string, body 
 	req.AddCookie(sess.Result().Cookies()[0])
 	rec := httptest.NewRecorder()
 	d.mux.ServeHTTP(rec, req)
+	d.deps.renditionWG.Wait()
 	return rec
 }
 

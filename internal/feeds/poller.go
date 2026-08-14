@@ -2,8 +2,10 @@ package feeds
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -53,6 +55,33 @@ type limitedBody struct {
 
 func (b limitedBody) Close() error { return b.closer.Close() }
 
+// feedTransport blocks fetches of private and link-local addresses. Feed
+// URLs are configured by the site owner, but the API/MCP surface can write
+// them with a bearer token — this keeps a leaked token from turning the
+// poller into a scheduled internal-network probe (RFC1918 services, the
+// link-local cloud metadata endpoint) whose findings land on /links.
+// Loopback is allowed: a self-hosted local feed is a legitimate target, and
+// the only thing on this host's loopback is dtcom's own auth-protected
+// surface.
+func feedTransport(max int64) http.RoundTripper {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	base := &http.Transport{
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				host = addr
+			}
+			if ip := net.ParseIP(host); ip != nil &&
+				(ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()) {
+				return nil, fmt.Errorf("feed fetch to private address %s refused", addr)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+	return limitedTransport{base: base, max: max}
+}
+
 type Poller struct {
 	store *store.Store
 	fp    *gofeed.Parser
@@ -70,10 +99,13 @@ func NewPoller(st *store.Store) *Poller {
 	// forever.
 	fp.Client = &http.Client{
 		Timeout:   perFeedTimeout,
-		Transport: limitedTransport{base: http.DefaultTransport, max: maxFeedBytes},
+		Transport: feedTransport(maxFeedBytes),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
-				return http.ErrUseLastResponse
+				// An error, not ErrUseLastResponse: handing the 3xx body to
+				// the parser would misreport a redirect loop as a parse
+				// failure.
+				return fmt.Errorf("stopped after 5 redirects")
 			}
 			return nil
 		},

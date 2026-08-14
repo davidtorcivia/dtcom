@@ -732,13 +732,19 @@ func linkErrorMessage(err error) string {
 
 func (d *Deps) adminLinkDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	removed := false
 	if id > 0 {
-		if _, err := d.Store.RemoveLink(id); err != nil {
+		var err error
+		removed, err = d.Store.RemoveLink(id)
+		if err != nil {
 			slog.Error("admin link delete", "id", id, "err", err)
 		}
 	}
-	if err := d.Engine.Rebuild(); err != nil {
-		slog.Error("rebuild after link delete", "err", err)
+	// A no-op delete (bad id, RSS link) must not trigger a full re-render.
+	if removed {
+		if err := d.Engine.Rebuild(); err != nil {
+			slog.Error("rebuild after link delete", "err", err)
+		}
 	}
 	http.Redirect(w, r, "/admin/links", http.StatusSeeOther)
 }

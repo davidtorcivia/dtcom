@@ -65,6 +65,14 @@ type ProcessedImage struct {
 	Alpha  bool
 }
 
+// dimensionsOK bounds the decoded size of an uploaded image. Each dimension
+// is checked before the product: a 65536×65536 header would wrap the product
+// to zero on a 32-bit build (and relies on decoder-internal caps elsewhere),
+// while a single over-limit dimension already implies an over-limit product.
+func dimensionsOK(w, h int) bool {
+	return w > 0 && h > 0 && w <= MaxImagePixels && h <= MaxImagePixels && w*h <= MaxImagePixels
+}
+
 // ProcessImage decodes an uploaded image, rejects implausible dimensions,
 // downscales it to at most maxDim on its longest side, and re-encodes it.
 //
@@ -83,13 +91,25 @@ func ProcessImage(r io.Reader, maxDim int) (*ProcessedImage, error) {
 	if err != nil {
 		return nil, ErrUnsupportedImage
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > MaxImagePixels {
+	if !dimensionsOK(cfg.Width, cfg.Height) {
 		return nil, fmt.Errorf("image is %dx%d, over the %d-pixel limit", cfg.Width, cfg.Height, MaxImagePixels)
 	}
 
 	src, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return nil, ErrUnsupportedImage
+	}
+	// image.Decode keeps only the first frame of an animated GIF. Reject it
+	// rather than silently serving a still of what the author remembers as
+	// an animation.
+	if format == "gif" {
+		g, gerr := gif.DecodeAll(bytes.NewReader(raw))
+		if gerr != nil {
+			return nil, ErrUnsupportedImage
+		}
+		if len(g.Image) > 1 {
+			return nil, fmt.Errorf("animated GIF (%d frames) is not supported; it would be flattened to its first frame", len(g.Image))
+		}
 	}
 	src = scaleLongestSide(src, maxDim)
 	b := src.Bounds()
@@ -238,7 +258,7 @@ func ResizeImage(srcPath, outPath string, maxDim int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode config: %w", err)
 	}
-	if cfg.Width*cfg.Height > MaxImagePixels {
+	if !dimensionsOK(cfg.Width, cfg.Height) {
 		return "", fmt.Errorf("image is %dx%d, over the %d-pixel limit", cfg.Width, cfg.Height, MaxImagePixels)
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {

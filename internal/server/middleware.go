@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,24 +17,25 @@ import (
 // Client IP
 // ---------------------------------------------------------------------------
 
-// clientIP returns the address to attribute a request to, for view dedup and
-// rate limiting.
-//
-// r.RemoteAddr is "host:port", and the port differs on every connection — using
-// it verbatim (as an earlier version did) made every page view look unique and
-// made per-IP rate limiting useless. Behind a reverse proxy it is also always
-// the proxy's own address, so the forwarded headers are consulted instead —
-// but only when DTCOM_TRUST_PROXY says a proxy is really in front, since a
-// directly-reachable server must never believe a client-supplied address.
+// clientIP returns the address used for view dedup and rate limiting.
+// RemoteAddr is "host:port" — the port must be stripped. Forwarded headers
+// are honored only when DTCOM_TRUST_PROXY says a proxy is in front; otherwise
+// they are client-controlled.
 func (d *Deps) clientIP(r *http.Request) string {
 	if d.Cfg != nil && d.Cfg.TrustProxyHeaders {
 		if v := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); v != "" {
 			return v
 		}
 		if v := r.Header.Get("X-Forwarded-For"); v != "" {
-			// Left-most entry is the original client; the rest are proxies.
-			if first, _, _ := strings.Cut(v, ","); strings.TrimSpace(first) != "" {
-				return strings.TrimSpace(first)
+			// Rightmost entry: a proxy that appends (the nginx/Cloudflare model)
+			// puts the address it actually saw last, so a client cannot forge it.
+			// The leftmost is client-supplied and only trustworthy when the proxy
+			// overwrites the header wholesale — CF-Connecting-IP above covers that
+			// case.
+			parts := strings.Split(v, ",")
+			last := strings.TrimSpace(parts[len(parts)-1])
+			if last != "" {
+				return last
 			}
 		}
 	}
@@ -73,18 +75,20 @@ const contentSecurityPolicy = "default-src 'self'; " +
 
 // securityHeaders applies the response headers every route should carry.
 //
-// The policy is the strict constant above unless site.yml configures an
-// analytics script, in which case that one origin is added to script-src (to
-// load the tag) and connect-src (to let it report back). Nothing else is
-// relaxed, and /admin never is: the tracker is only ever injected into public
-// pages, so widening the policy on the authenticated surface would buy nothing
-// and cost the guarantee that an admin page runs only its own code.
+// The CSP widens only for a configured analytics origin, and never on /admin:
+// the tracker runs only on public pages, so the authenticated surface keeps
+// the guarantee that it executes only its own code.
 func (d *Deps) securityHeaders(next http.Handler) http.Handler {
+	hsts := d.Cfg != nil && strings.HasPrefix(d.Cfg.BaseURL, "https://")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// The proxy in front (e.g. Cloudflare Tunnel) does not add this.
+		if hsts {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		h.Set("Content-Security-Policy", d.policyFor(r))
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		next.ServeHTTP(w, r)
@@ -340,12 +344,38 @@ func (g *gzipResponseWriter) Close() {
 	}
 }
 
+// acceptsGzip reports whether the client's Accept-Encoding permits gzip.
+// A `gzip;q=0` entry explicitly refuses it and must not be served compressed.
+func acceptsGzip(header string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		name, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(name), "gzip") {
+			continue
+		}
+		for _, p := range strings.Split(params, ";") {
+			k, v, _ := strings.Cut(strings.TrimSpace(p), "=")
+			if strings.EqualFold(strings.TrimSpace(k), "q") {
+				q, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+				if err == nil && q == 0 {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // compression gzips text responses for clients that accept it. Every page this
 // server emits is HTML, CSS, JS, XML, or JSON, and the largest of them (an
 // article page plus its stylesheet) compresses to roughly a fifth of its size.
 func compression(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}

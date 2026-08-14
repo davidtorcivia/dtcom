@@ -2,16 +2,10 @@ package backup
 
 // "Has anything actually changed?"
 //
-// A backup of a site identical to the one already saved protects nothing, and
-// under a "keep the last N" policy it does harm: it pushes a genuinely
-// different state off the end of the list. So each archive records what the
-// site looked like, and the next one compares before writing.
-//
-// The fingerprint covers the posts and site.yml by content, the image masters
-// by name — their names are their content hashes, so a name is a digest — and
-// the authored rows of the database. It deliberately does not cover view
-// counts: those tick up whenever anybody reads the site, and letting them
-// decide would mean an archive every night of an unchanged site.
+// Each archive records a fingerprint — posts and site.yml by content, image
+// masters by name (names are content hashes), and the authored rows of the
+// database. View counts are deliberately excluded: they tick on every read and
+// would mean an archive a night of an otherwise unchanged site.
 
 import (
 	"archive/tar"

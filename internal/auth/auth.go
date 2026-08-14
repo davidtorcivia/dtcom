@@ -54,21 +54,24 @@ func New(o Options) *Auth {
 // what totp.Validate assumes).
 const totpPeriod = 30
 
-// CheckPasswordAndTOTP verifies both factors. Both are always evaluated — the
-// TOTP check is not short-circuited on a bad password — so the response time
-// doesn't leak which factor failed. A TOTP code is accepted at most once.
+// CheckPasswordAndTOTP verifies both factors. The TOTP branch runs (and burns
+// its compare) even on a bad password so response time doesn't leak which
+// factor failed. A code is accepted at most once.
 func (a *Auth) CheckPasswordAndTOTP(password, code string) bool {
 	passwordOK := bcrypt.CompareHashAndPassword(a.passwordHash, []byte(password)) == nil
-	codeOK := totp.Validate(strings.TrimSpace(code), a.totpSecret)
+	code = strings.TrimSpace(code)
+	codeOK := totp.Validate(code, a.totpSecret)
 	if !passwordOK || !codeOK {
 		return false
 	}
-	return a.consumeTOTP(time.Now())
+	return a.consumeTOTP(time.Now(), code)
 }
 
-// consumeTOTP marks the current time-step as spent, returning false if this
-// step was already used by an earlier successful login (replay).
-func (a *Auth) consumeTOTP(now time.Time) bool {
+// consumeTOTP marks the step a code belongs to as spent. Skew of one step
+// means a code validates across three wall-clock steps, so marking the
+// time-of-use step (as an earlier version did) let a captured code replay
+// across a step boundary. Returns false if the matching step was already used.
+func (a *Auth) consumeTOTP(now time.Time, code string) bool {
 	step := now.Unix() / totpPeriod
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -78,11 +81,18 @@ func (a *Auth) consumeTOTP(now time.Time) bool {
 			delete(a.usedTOTP, s)
 		}
 	}
-	if _, used := a.usedTOTP[step]; used {
-		return false
+	for _, s := range []int64{step - 1, step, step + 1} {
+		want, err := totp.GenerateCode(a.totpSecret, time.Unix(s*totpPeriod, 0))
+		if err != nil || want != code {
+			continue
+		}
+		if _, used := a.usedTOTP[s]; used {
+			return false
+		}
+		a.usedTOTP[s] = now
+		return true
 	}
-	a.usedTOTP[step] = now
-	return true
+	return false
 }
 
 // GenerateTOTP produces a current TOTP code (for testing / setup display).

@@ -50,7 +50,8 @@ func (s *Store) CreateAPIToken(name string) (string, *APIToken, error) {
 		name = "unnamed"
 	}
 	if len(name) > maxTokenName {
-		name = name[:maxTokenName]
+		// Cut back to a rune boundary so the stored name stays valid UTF-8.
+		name = truncate(name, maxTokenName)
 	}
 
 	buf := make([]byte, 32)

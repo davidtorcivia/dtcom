@@ -9,7 +9,8 @@ import (
 )
 
 type Watcher struct {
-	fw *fsnotify.Watcher
+	fw   *fsnotify.Watcher
+	done chan struct{}
 }
 
 // Watch recursively watches dir and sends changed file paths to events.
@@ -32,6 +33,7 @@ func Watch(dir string, events chan<- string) (*Watcher, error) {
 		fw.Close()
 		return nil, err
 	}
+	w := &Watcher{fw: fw, done: make(chan struct{})}
 	go func() {
 		for {
 			select {
@@ -39,11 +41,24 @@ func Watch(dir string, events chan<- string) (*Watcher, error) {
 				if !ok {
 					return
 				}
+				// fsnotify is not recursive: a directory created after
+				// startup needs its own watch, or files placed under it
+				// would never be seen.
+				if ev.Op&fsnotify.Create != 0 {
+					if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+						_ = fw.Add(ev.Name)
+					}
+				}
 				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) != 0 {
+					// Block rather than drop: the consumer is typically
+					// inside a rebuild when the buffer fills, and a dropped
+					// event means a write no rebuild ever sees. Blocking
+					// coalesces instead — the debouncer rebuilds once the
+					// burst drains.
 					select {
 					case events <- ev.Name:
-					default:
-						// coalesce: drop if consumer isn't keeping up
+					case <-w.done:
+						return
 					}
 				}
 			case _, ok := <-fw.Errors:
@@ -53,7 +68,10 @@ func Watch(dir string, events chan<- string) (*Watcher, error) {
 			}
 		}
 	}()
-	return &Watcher{fw: fw}, nil
+	return w, nil
 }
 
-func (w *Watcher) Close() error { return w.fw.Close() }
+func (w *Watcher) Close() error {
+	close(w.done)
+	return w.fw.Close()
+}

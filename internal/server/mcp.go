@@ -201,20 +201,10 @@ func (d *Deps) readArticleResource(ctx context.Context, req *mcp.ReadResourceReq
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
-// Tool annotations
-//
-// What a tool does to the site, so a client can tell reading from writing and
-// writing from destroying — which is what it consults to decide whether a call
-// needs asking about first.
-//
-// These have to be stated. Both destructiveHint and openWorldHint default to
-// true when absent, so an unannotated server advertises every tool as capable
-// of wrecking something and of reaching out to the internet, and list_articles
-// looks exactly like delete_article. They are hints, not guarantees, and a
-// client is right not to trust them from a server it does not know; this one
-// is reached with a bearer token the operator issued.
-// ---------------------------------------------------------------------------
+// Tool annotations: what a tool does to the site. destructiveHint and
+// openWorldHint both default to true when absent, so an unannotated server
+// advertises every tool as capable of wrecking something — these make
+// list_articles distinguishable from delete_article.
 
 func boolp(b bool) *bool { return &b }
 

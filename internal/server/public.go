@@ -19,21 +19,34 @@ const maxSearchQuery = 128
 // the set of pages that actually exist.
 const maxTrackPath = 200
 
+// noDirListing 404s directory requests. http.FileServer would otherwise
+// render a full listing — /images/ would enumerate every upload, defeating
+// the unguessability the content-addressed names rely on.
+func (d *Deps) noDirListing(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			d.handleNotFound(w, r)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // registerPublic wires the unauthenticated public surface: static assets,
 // uploaded images, the search/track JSON endpoints, content-negotiated article
 // routes, and the pre-rendered public/ files (home, links, search, feeds).
 func registerPublic(mux *http.ServeMux, d *Deps) {
 	// static assets — cached for a week with revalidation
 	mux.Handle("GET /static/", cacheControl(staticCacheControl,
-		http.StripPrefix("/static/", http.FileServer(http.Dir(d.Cfg.StaticDir)))))
+		d.noDirListing(http.StripPrefix("/static/", http.FileServer(http.Dir(d.Cfg.StaticDir))))))
 	// uploaded images — content-addressed names, so cache them indefinitely
 	mux.Handle("GET /images/", cacheControl(imageCacheControl,
-		svgPolicy(http.StripPrefix("/images/", http.FileServer(http.Dir(d.Cfg.ImagesDir))))))
+		d.noDirListing(svgPolicy(http.StripPrefix("/images/", http.FileServer(http.Dir(d.Cfg.ImagesDir)))))))
 	// generated social preview cards. Named after their own content like the
 	// uploads above, so the same indefinite cache applies: a card's bytes can
 	// never change under a given URL, and an edited post produces a new one.
 	mux.Handle("GET /og/", cacheControl(imageCacheControl,
-		http.StripPrefix("/og/", http.FileServer(http.Dir(filepath.Join(d.Cfg.PublicDir, "og"))))))
+		d.noDirListing(http.StripPrefix("/og/", http.FileServer(http.Dir(filepath.Join(d.Cfg.PublicDir, "og")))))))
 
 	// unauthed dynamic endpoints
 	mux.HandleFunc("GET /api/search", d.handleSearch)

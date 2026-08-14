@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -225,14 +226,42 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// Save serializes the config back to a site.yml file.
+// Save serializes the config back to a site.yml file. Written atomically:
+// readers (the watcher's rebuild, concurrent requests) must never observe a
+// half-written file.
 func Save(path string, c *Config) error {
 	out, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal site.yml: %w", err)
 	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := writeFileAtomic(path, out); err != nil {
 		return fmt.Errorf("write site.yml: %w", err)
 	}
 	return nil
+}
+
+// writeFileAtomic writes to a temp file in the destination directory and
+// renames it into place.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }

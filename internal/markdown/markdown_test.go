@@ -30,6 +30,27 @@ func TestRenderHighlight(t *testing.T) {
 	}
 }
 
+// The highlight pass must not touch code, math, or attributes: a comparison
+// operator (a == b) inside a <pre> or a math span is not a highlight, and
+// wrapping its halves in <mark> both corrupts the code and can produce
+// structurally broken markup (two code spans on one line).
+func TestHighlightSkipsCodeAndMath(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"code block", "```go\nif a == b && c == d {}\n```\n"},
+		{"inline code", "`a == b` and `c == d`"},
+		{"math", "$$a == b \\quad c == d$$\n"},
+	}
+	for _, tc := range cases {
+		html, err := Render(tc.in)
+		if err != nil {
+			t.Fatalf("%s: Render: %v", tc.name, err)
+		}
+		if strings.Contains(html, "<mark>") {
+			t.Errorf("%s: highlight leaked into protected region:\n%s", tc.name, html)
+		}
+	}
+}
+
 // The fence's language has to reach the output. It used to do that as
 // goldmark's plain class="language-go"; Chroma now consumes the language and
 // emits per-token classes instead, which is the same fact expressed more

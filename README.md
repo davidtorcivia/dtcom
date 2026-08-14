@@ -149,11 +149,11 @@ For Claude Desktop, drop that block into `claude_desktop_config.json`. The trans
 Seventeen tools are exposed, grouped by what they touch:
 
 | Group | Tools |
-|-------|-------|
+| ------- | ------- |
 | Articles | `list_articles`, `get_article`, `create_article`, `update_article`, `delete_article`, `search_articles` |
-| Links    | `list_links`, `add_link`, `remove_link` |
-| Site     | `get_site`, `update_bio`, `update_nav`, `update_social`, `update_rss_feeds` |
-| Ops      | `regenerate`, `get_stats`, `refresh_feeds` |
+| Links | `list_links`, `add_link`, `remove_link` |
+| Site | `get_site`, `update_bio`, `update_nav`, `update_social`, `update_rss_feeds` |
+| Ops | `regenerate`, `get_stats`, `refresh_feeds` |
 
 `/admin/integrations` renders the config block above with your actual URL and a token, ready to copy.
 
@@ -205,7 +205,7 @@ Worth knowing before this faces the internet:
 - **Admin**: password (bcrypt) + TOTP, HMAC-signed session cookie, `SameSite=Lax` plus a `Sec-Fetch-Site`/`Origin` check on every write. A TOTP code is accepted once — it cannot be replayed inside its 30-second window. Login is rate limited per IP and globally, since bcrypt is expensive and a six-digit code is guessable.
 - **API/MCP**: constant-time comparison for the bootstrap token, hashed lookup for managed ones; failed attempts are rate limited per IP. Managed tokens are stored as digests, never in the clear.
 - **Destructive actions** in the admin are behind a styled confirmation dialog. It is a real `<dialog>` driven from `admin.js` rather than an inline `onsubmit="return confirm(...)"` — the CSP forbids inline handlers, so an inline confirm would not run at all and the delete would go straight through.
-- **Headers**: `Content-Security-Policy` with a strict `script-src` (no page executes an inline script), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`. Every source is `'self'` apart from `img-src`, which allows `https:` so posts can reference remote images. Typography is self-hosted from `static/fonts/`, so there are no third-party font hosts to allow.
+- **Headers**: `Content-Security-Policy` with a strict `script-src` (no page executes an inline script), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Strict-Transport-Security` on https deployments (the proxy in front does not add it for you). Every source is `'self'` apart from `img-src`, which allows `https:` so posts can reference remote images. Typography is self-hosted from `static/fonts/`, so there are no third-party font hosts to allow.
 - **Markdown** renders with raw HTML enabled, because posts are author-written. Everything downstream treats rendered output as untrusted anyway: the search index strips tags, and search excerpts are escaped before their highlight markers are restored.
 - **Views** store a keyed hash of the client address, not the address. The key is `DTCOM_SESSION_KEY`, so the stored value is meaningless without it.
 - **Raster uploads** are decoded, dimension-checked against a decompression-bomb limit, and re-encoded, so the served bytes are always a real image in a format we chose.

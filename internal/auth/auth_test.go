@@ -73,7 +73,12 @@ func TestUsedTOTPMapIsPruned(t *testing.T) {
 	a := newTestAuth()
 	base := time.Now()
 	for i := range 100 {
-		a.consumeTOTP(base.Add(time.Duration(i) * totpPeriod * time.Second))
+		// A code for step i, passed at step i: marks exactly that step.
+		code, err := a.GenerateTOTP(base.Add(time.Duration(i) * totpPeriod * time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.consumeTOTP(base.Add(time.Duration(i)*totpPeriod*time.Second), code)
 	}
 	a.mu.Lock()
 	n := len(a.usedTOTP)

@@ -2,17 +2,17 @@ package store
 
 // Snapshot and restore of the database file itself.
 //
-// The database is one of the two things on this machine that cannot be
-// reconstructed from anything else — view counts, links, and the API tokens'
-// digests. (The search index in it can be rebuilt from the posts, and is, on
-// every rebuild.)
+// The database holds the one copy of view counts, links, and the API tokens'
+// digests (the search index in it is rebuilt from the posts on every rebuild).
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Snapshot writes a consistent copy of the database to path.
@@ -24,21 +24,28 @@ import (
 // performed by SQLite itself against a consistent read of the whole database,
 // and it compacts as it goes.
 //
-// The destination must not exist; SQLite refuses to overwrite.
+// The destination must not exist; SQLite refuses to overwrite. It is vacuumed
+// to a sibling temp file and renamed into place, so a failed run does not
+// destroy a previous snapshot at the same path.
 func (s *Store) Snapshot(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	tmp := path + ".tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	// The path is interpolated as a SQL string literal because VACUUM INTO
 	// takes a literal, not a bound parameter. Doubling any quote is the whole
 	// escaping rule for SQLite string literals, and the caller's path is
 	// server-side — never anything a request supplied.
-	quoted := "'" + escapeSQLString(path) + "'"
+	quoted := "'" + escapeSQLString(tmp) + "'"
 	if _, err := s.conn().Exec("VACUUM INTO " + quoted); err != nil {
 		return fmt.Errorf("vacuum into %s: %w", path, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
 	}
 	return nil
 }
@@ -96,15 +103,18 @@ func (s *Store) ContentFingerprint() (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// escapeSQLString doubles single quotes, the whole escaping rule for SQLite
+// string literals. Byte-wise: a path with invalid UTF-8 must survive the
+// round trip unchanged.
 func escapeSQLString(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r == '\'' {
-			out = append(out, '\'')
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			b.WriteByte('\'')
 		}
-		out = append(out, r)
+		b.WriteByte(s[i])
 	}
-	return string(out)
+	return b.String()
 }
 
 // ReplaceWith swaps the live database for the file at path.
@@ -201,10 +211,25 @@ func verifyDatabase(path string) error {
 	return nil
 }
 
+// copyFile streams src to dst. The database can be large; reading it whole
+// would spike RSS for no benefit.
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dst, data, 0o644)
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

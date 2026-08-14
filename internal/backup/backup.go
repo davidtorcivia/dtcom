@@ -1,11 +1,8 @@
 // Package backup archives the two things on this machine that cannot be
 // reconstructed, and puts them back.
 //
-// Neither `content/` nor `data/` is in git — that is deliberate, and it is
-// documented in .gitignore and docs/deploy-erebus.md — so a post, an uploaded
-// picture, and a view count exist in exactly one place. This package makes a
-// second one.
-//
+// Neither content/ nor data/ is in git, so a post, an uploaded picture, and a
+// view count exist in exactly one place; this package makes a second one.
 // An archive is a gzipped tar holding:
 //
 //	manifest.json     what this is, when it was taken, and what was in it
@@ -13,12 +10,9 @@
 //	data/dtcom.db     a VACUUM INTO snapshot, consistent as of the moment
 //	data/images/…     the uploaded masters
 //
-// Renditions are left out on purpose, and so is public/. Both are derived: the
-// renditions are regenerated from the masters by the backfill that runs at
-// startup, and public/ is regenerated from content and the database on every
-// rebuild. Including them would multiply what is stored roughly fourfold to
-// protect files that are already reproducible. What goes in an archive is what
-// cannot be worked out again.
+// Renditions and public/ are deliberately excluded — both are derived and
+// regenerated (renditions at startup, public/ on every rebuild); archiving
+// them would multiply storage roughly fourfold to protect reproducible files.
 package backup
 
 import (

@@ -5,33 +5,19 @@ import (
 	"strings"
 )
 
-// Figures: captions, and light/dark image pairs.
+// Figures: captions and light/dark image pairs.
 //
-// A picture on its own line, ![Caption text](/images/x.jpg), becomes a <figure>
-// with the alt text repeated as a visible <figcaption>. Markdown has no caption
-// syntax, and alt text is the only place an author can put a description
-// without inventing one.
+// An image alone in its paragraph becomes a <figure> with its alt text as the
+// visible <figcaption> — markdown has no caption syntax and alt is where a
+// description already belongs. Images used mid-sentence are left as prose.
 //
-// An image whose URL ends in #light or #dark is themed. Give both and they
-// collapse into one figure that swaps with the site theme:
+// URLs tagged #light and #dark collapse into one figure that swaps with the
+// theme, via CSS keyed on data-theme — a <picture media=prefers-color-scheme>
+// would follow the OS only and ignore the site's theme toggle.
 //
-//	![The sRGB transfer function](/images/fig2-light.png#light)
-//	![The sRGB transfer function](/images/fig2-dark.png#dark)
-//
-// The swap is CSS, keyed on the same data-theme attribute the rest of the site
-// uses. A <picture> element with media="(prefers-color-scheme: dark)" would
-// have been the obvious construct and is wrong here: it follows the operating
-// system only, so it would ignore the theme toggle in the header and strand a
-// reader who picked dark on a light desktop.
-//
-// Only images that are the whole of their paragraph are promoted. An image used
-// mid-sentence is part of the prose and gets nothing — captioning it would drop
-// a block element into the middle of a line.
-//
-// Done on the rendered HTML rather than in the AST, matching how ==highlight==
-// is handled in Render. The input is not arbitrary HTML: it is this renderer's
-// own output, where goldmark has already escaped every attribute value, so
-// `[^>]*` cannot run past the tag it is matching.
+// Done on rendered HTML, matching how ==highlight== is handled. The input is
+// this renderer's own output, where goldmark has escaped every attribute
+// value, so `[^>]*` cannot run past the tag it is matching.
 
 // imageOnlyParagraph matches a paragraph whose entire content is one or more
 // <img> tags and whitespace. Any text, link, or other element in the paragraph

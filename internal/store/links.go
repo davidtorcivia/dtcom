@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"modernc.org/sqlite"
 )
 
 // Sentinel errors so callers can map a failure to the right HTTP status
@@ -30,20 +32,13 @@ type Link struct {
 	CreatedAt int64
 }
 
-// SanitizeHref returns the href unchanged if it has a safe scheme (http, https,
-// mailto) or is relative (starts with / or #). Otherwise it returns "" which
-// the caller treats as "drop this link".
+// SanitizeHref returns the href unchanged if it has a safe scheme (http,
+// https, mailto) or is relative (starts with / or #); otherwise "".
 //
-// It is exported because the admin nav and social-link editors need the same
-// guarantee for hrefs an operator types in, and a second copy of an allowlist
-// is a second place for it to rot.
-//
-// This blocks javascript:, data:, vbscript:, and other dangerous schemes from
-// ever being stored or rendered as a clickable link — important because link
-// hrefs come from external RSS feeds (unauthenticated inbound) where a
-// malicious feed item like <link>javascript:alert(1)</link> would otherwise
-// round-trip into an <a href="javascript:..."> on /links. Go's html/template
-// escapes the attribute but does not block the scheme itself.
+// This is the guard against javascript:/data:/vbscript: hrefs reaching an <a>
+// tag — link hrefs arrive from external RSS feeds, where a malicious
+// <link>javascript:…</link> would otherwise round-trip onto /links. Exported
+// because the admin nav and social editors need the same allowlist.
 func SanitizeHref(href string) string {
 	h := strings.TrimSpace(href)
 	if h == "" {
@@ -62,6 +57,18 @@ func SanitizeHref(href string) string {
 	}
 	// anything else (javascript:, data:, vbscript:, unknown:) — reject.
 	return ""
+}
+
+// isUniqueViolation reports whether err is a UNIQUE constraint failure,
+// checked via the driver's error type rather than message text.
+func isUniqueViolation(err error) bool {
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		// 2067 = SQLITE_CONSTRAINT_UNIQUE (primary result code
+		// SQLITE_CONSTRAINT=19 plus the unique-violation offset).
+		return se.Code() == 2067
+	}
+	return false
 }
 
 // AddLink inserts a manual link. A disallowed href scheme (javascript:, data:,
@@ -88,8 +95,9 @@ func (s *Store) AddLink(l Link) (int64, error) {
 	)
 	if err != nil {
 		// The href column carries a unique index; a repeat submission is an
-		// ordinary conflict, not a server fault.
-		if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
+		// ordinary conflict, not a server fault. Matched on the driver's
+		// constraint code rather than the message text.
+		if isUniqueViolation(err) {
 			return 0, ErrDuplicateLink
 		}
 		return 0, fmt.Errorf("insert link: %w", err)

@@ -2,34 +2,19 @@ package markdown
 
 // Responsive images.
 //
-// A post writes ![](/images/9f3c….png) and means "the picture". What should
-// reach a phone is not the picture — it is the smallest rendition that still
-// looks right on that screen. This pass turns each <img> into a tag that says
-// what exists and lets the browser choose:
+// A post writes ![](/images/9f3c….png). This pass turns each local <img> into
+// a srcset/picture tag offering every rendition on disk, so a phone fetches
+// a copy cut for a phone. <picture> appears only when WebP renditions exist
+// (lossless masters only — photographs stay plain <img> with a JPEG srcset;
+// see internal/build/imageset.go).
 //
-//	<picture>
-//	  <source type="image/webp" srcset="…w480.webp 480w, …" sizes="…">
-//	  <img src="…w1080.png" srcset="…w480.png 480w, …" sizes="…"
-//	       width="2000" height="1111" decoding="async" loading="lazy"
-//	       data-full="/images/9f3c….png" data-full-w="2000" data-full-h="1111">
-//	</picture>
+// data-full/data-full-w carry the master's URL and intrinsic width for the
+// lightbox: pages load renditions, and zooming into a rendition would be
+// zooming into a thumbnail.
 //
-// The <picture> appears only when there are WebP renditions to offer, which is
-// the lossless family — photographs get a plain <img> with a JPEG srcset,
-// because lossless WebP of a photograph is several times the size of the JPEG
-// and there is no lossy WebP in this pipeline. See internal/build/imageset.go
-// for why.
-//
-// data-full is the master, and the lightbox reads it: what a page loads is a
-// rendition, and zooming into a rendition would be zooming into a thumbnail.
-// data-full-w travels with it because the lightbox has to know the master's
-// true width before the master has finished loading — it is what decides how
-// far a zoom can go while staying sharp.
-//
-// Applied after captionImages, and the order is load-bearing: figure detection
-// matches paragraphs whose entire content is <img> tags, and a <picture>
-// wrapper would stop every figure and every light/dark pair from being
-// recognised.
+// Runs after captionImages: figure detection matches paragraphs made only of
+// <img> tags, and a <picture> wrapper would stop every figure and light/dark
+// pair from being recognised.
 
 import (
 	"regexp"
@@ -37,12 +22,9 @@ import (
 	"strings"
 )
 
-// sizesAttr tells the browser how wide the picture will be before any CSS has
-// loaded, which is when it has to choose a rendition.
-//
-// It mirrors the layout exactly, and has to be revisited when that changes:
-// .site-container is 1080px wide with 2rem of padding, tightening to 1rem of
-// padding at 640px. So: the viewport less its padding, up to a 1016px measure.
+// sizesAttr mirrors the layout so the browser can pick a rendition before CSS
+// loads: .site-container is 1080px with 2rem padding, 1rem below 640px.
+// Revisit when the layout changes.
 const sizesAttr = "(max-width: 640px) calc(100vw - 2rem), (max-width: 1080px) calc(100vw - 4rem), 1016px"
 
 // defaultSrcWidth is the rendition a browser without srcset support gets. The

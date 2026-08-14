@@ -256,28 +256,36 @@ func backupLoop(ctx context.Context, svc *backup.Service) {
 		return
 	}
 	// Checked far more often than the interval, so the first archive after a
-	// long downtime is taken promptly rather than a full period late.
+	// long downtime is taken promptly rather than a full period late. An
+	// "unchanged" answer backs the next check off to the interval itself: a
+	// quiet site would otherwise re-hash every file 96 times a day for
+	// nothing.
 	const check = 15 * time.Minute
+	var nextCheckAt time.Time
 	t := time.NewTicker(check)
 	defer t.Stop()
 	for {
-		if due, err := backupDue(svc); err != nil {
-			slog.Warn("backup schedule", "err", err)
-		} else if due {
-			info, err := svc.Create(backup.KindScheduled)
-			switch {
-			case errors.Is(err, backup.ErrUnchanged):
-				// The site is what the newest archive already holds. Said at
-				// debug level because on a quiet week this is every check.
-				slog.Debug("backup not needed", "unchanged_since", info.Name)
-			case err != nil:
-				slog.Error("scheduled backup failed", "err", err)
-			default:
-				slog.Info("scheduled backup", "name", info.Name, "bytes", info.Size)
-				if removed, swept, err := svc.Prune(); err != nil {
-					slog.Warn("prune backups", "err", err)
-				} else if len(removed) > 0 || swept > 0 {
-					slog.Info("old backups pruned", "archives", len(removed), "pooled_images", swept)
+		if time.Now().After(nextCheckAt) {
+			nextCheckAt = time.Time{}
+			if due, err := backupDue(svc); err != nil {
+				slog.Warn("backup schedule", "err", err)
+			} else if due {
+				info, err := svc.Create(backup.KindScheduled)
+				switch {
+				case errors.Is(err, backup.ErrUnchanged):
+					// The site is what the newest archive already holds. Said at
+					// debug level because on a quiet week this is every check.
+					slog.Debug("backup not needed", "unchanged_since", info.Name)
+					nextCheckAt = time.Now().Add(svc.Interval())
+				case err != nil:
+					slog.Error("scheduled backup failed", "err", err)
+				default:
+					slog.Info("scheduled backup", "name", info.Name, "bytes", info.Size)
+					if removed, swept, err := svc.Prune(); err != nil {
+						slog.Warn("prune backups", "err", err)
+					} else if len(removed) > 0 || swept > 0 {
+						slog.Info("old backups pruned", "archives", len(removed), "pooled_images", swept)
+					}
 				}
 			}
 		}
