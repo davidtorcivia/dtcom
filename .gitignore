@@ -16,8 +16,13 @@
 # site shows up as a diff and every deploy risks a conflict against it.
 #
 # This is not backed up by being in the repo. Back up content/ and data/
-# together; see docs/deploy-erebus.md.
+# together as part of the deployment's backup routine.
 /content/
+
+# Working notes: deployment runbooks, design specs, and implementation plans.
+# They track the author's machine rather than the source, so they stay local
+# and out of the history.
+/docs/
 
 # Generated
 /public/
