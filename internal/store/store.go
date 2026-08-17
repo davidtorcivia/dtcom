@@ -131,6 +131,8 @@ func (s *Store) migrate() error {
 		"country":  "TEXT NOT NULL DEFAULT ''",
 		"city":     "TEXT NOT NULL DEFAULT ''",
 		"dwell":    "INTEGER NOT NULL DEFAULT 0",
+		"lat":      "REAL NOT NULL DEFAULT 0",
+		"lon":      "REAL NOT NULL DEFAULT 0",
 	})
 }
 

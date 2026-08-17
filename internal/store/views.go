@@ -16,6 +16,11 @@ type View struct {
 	Referrer string // hostname only, "" for direct or same-site
 	Country  string
 	City     string
+	// Lat and Lon are the city's centre as the proxy reported it, not the
+	// visitor's position. Zero in both means unknown: the coordinate exists in
+	// the Atlantic and no city sits on it, so it costs nothing to spend it as
+	// the empty value and saves threading nullable floats through every caller.
+	Lat, Lon float64
 }
 
 // RecordView records a unique (path, day, ip_hash) page view. Repeated calls
@@ -27,9 +32,10 @@ func (s *Store) RecordView(v View) error {
 		return nil
 	}
 	_, err := s.conn().Exec(
-		`INSERT INTO views(path, day, ip_hash, ts, referrer, country, city) VALUES(?,?,?,?,?,?,?)
+		`INSERT INTO views(path, day, ip_hash, ts, referrer, country, city, lat, lon)
+		 VALUES(?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(path, day, ip_hash) DO NOTHING`,
-		v.Path, v.Day, v.IPHash, time.Now().Unix(), v.Referrer, v.Country, v.City,
+		v.Path, v.Day, v.IPHash, time.Now().Unix(), v.Referrer, v.Country, v.City, v.Lat, v.Lon,
 	)
 	if err != nil {
 		return fmt.Errorf("record view: %w", err)
@@ -280,6 +286,53 @@ func (s *Store) labelCounts(expr, since string, limit int) ([]LabelCount, error)
 			return nil, err
 		}
 		out = append(out, lc)
+	}
+	return out, rows.Err()
+}
+
+// Place is a spot on the map: a coordinate, what it is called, and how many
+// views came from it.
+type Place struct {
+	Label    string
+	Lat, Lon float64
+	Count    int64
+}
+
+// PlacePoints groups views by coordinate for the map. Coordinates are rounded
+// to a tenth of a degree, roughly 11km, which merges the neighbourhoods of one
+// city into a single dot and is finer than the city centre the proxy reports
+// anyway.
+func (s *Store) PlacePoints(since string, limit int) ([]Place, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	where := `(lat <> 0 OR lon <> 0)`
+	args := []any{}
+	if since != "" {
+		where += ` AND day >= ?`
+		args = append(args, since)
+	}
+	args = append(args, limit)
+	// city and country are bare columns here: they are constant within a
+	// rounded coordinate, so whichever row SQLite takes them from is the same
+	// answer.
+	rows, err := s.conn().Query(
+		`SELECT CASE WHEN city <> '' AND country <> '' THEN city || ', ' || country
+		             WHEN city <> '' THEN city ELSE country END label,
+		        round(lat, 1) la, round(lon, 1) lo, count(*) c
+		 FROM views WHERE `+where+`
+		 GROUP BY la, lo ORDER BY c DESC, label LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("place points: %w", err)
+	}
+	defer rows.Close()
+	var out []Place
+	for rows.Next() {
+		var p Place
+		if err := rows.Scan(&p.Label, &p.Lat, &p.Lon, &p.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

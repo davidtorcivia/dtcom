@@ -28,9 +28,9 @@ func dashboardFor(t *testing.T, d *testDeps, query string) string {
 	return rec.Body.String()
 }
 
-// TestDashboardRangesRender walks every range option through both selectors.
-// The two are independent, so the point is as much that switching one carries
-// the other along as that each renders.
+// TestDashboardRangesRender walks every range option through every selector.
+// The four are independent, so the point is as much that changing one carries
+// the other three along as that each renders.
 func TestDashboardRangesRender(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	today := time.Now().UTC().Format("2006-01-02")
@@ -38,23 +38,22 @@ func TestDashboardRangesRender(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, r := range dashboardRanges {
-		body := dashboardFor(t, d, "?chart="+r.Key+"&top=7d")
-		if !strings.Contains(body, `<option value="`+r.Key+`" selected>`) {
-			t.Errorf("chart range %q did not render as the selected option", r.Key)
-		}
-		// Each picker submits only its own field, so the other one's current
-		// value has to travel as a hidden input or switching either resets it.
-		if !strings.Contains(body, `<input type="hidden" name="chart" value="`+r.Key+`">`) {
-			t.Errorf("chart range %q was not carried by the most-read picker", r.Key)
-		}
-
-		body = dashboardFor(t, d, "?chart=7d&top="+r.Key)
-		if !strings.Contains(body, `<option value="`+r.Key+`" selected>`) {
-			t.Errorf("top range %q did not render as the selected option", r.Key)
-		}
-		if !strings.Contains(body, `<input type="hidden" name="top" value="`+r.Key+`">`) {
-			t.Errorf("top range %q was not carried by the chart picker", r.Key)
+	for _, sel := range dashboardSelectors {
+		for _, r := range dashboardRanges {
+			body := dashboardFor(t, d, "?"+sel.Param+"="+r.Key)
+			if !strings.Contains(body, `<select id="`+sel.ID+`"`) {
+				t.Fatalf("%s: no selector rendered", sel.Param)
+			}
+			if !strings.Contains(body, `<option value="`+r.Key+`" selected>`) {
+				t.Errorf("%s range %q did not render as the selected option", sel.Param, r.Key)
+			}
+			// A picker submits only its own field, so every other selector's
+			// current value has to travel with it as a hidden input. There are
+			// four selectors, so each range appears in the other three forms.
+			if n := strings.Count(body, `<input type="hidden" name="`+sel.Param+`" value="`+r.Key+`">`); n != len(dashboardSelectors)-1 {
+				t.Errorf("%s range %q was carried by %d other pickers, want %d",
+					sel.Param, r.Key, n, len(dashboardSelectors)-1)
+			}
 		}
 	}
 }
@@ -63,12 +62,15 @@ func TestDashboardRangesRender(t *testing.T) {
 // a hand-edited or stale URL must land on the default rather than a blank page.
 func TestDashboardUnknownRangeFallsBack(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
-	body := dashboardFor(t, d, "?chart=../etc&top=99y")
-	if !strings.Contains(body, `<input type="hidden" name="top" value="`+defaultTopRange+`">`) {
-		t.Errorf("unknown top range did not fall back to %s", defaultTopRange)
-	}
-	if !strings.Contains(body, `<input type="hidden" name="chart" value="`+defaultChartRange+`">`) {
-		t.Errorf("unknown chart range did not fall back to %s", defaultChartRange)
+	body := dashboardFor(t, d, "?chart=../etc&top=99y&ref=nonsense&place=")
+	for _, sel := range dashboardSelectors {
+		want := defaultTopRange
+		if sel.Param == "chart" {
+			want = defaultChartRange
+		}
+		if !strings.Contains(body, `<input type="hidden" name="`+sel.Param+`" value="`+want+`">`) {
+			t.Errorf("unknown %s range did not fall back to %s", sel.Param, want)
+		}
 	}
 }
 

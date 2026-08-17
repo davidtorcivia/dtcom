@@ -128,10 +128,12 @@ The built-in view counter keeps running alongside it, and answers most of what a
 | Unique visitors | Distinct address hashes. No session, no cookie, no identifier stored in the browser — so somebody whose address changes counts twice, and a household behind one address counts once. |
 | Pages each | Views ÷ visitors over the range. Not a session length: two visits a week apart from one address read as one visitor going further. |
 | Where from | The **hostname** of `document.referrer`, never the path or query — a search referrer's query string is the words somebody typed. Our own domain is dropped, so the list is arrivals, not internal navigation. |
-| Places | `CF-IPCity` / `CF-IPCountry`, read only when `DTCOM_TRUST_PROXY` says a proxy is in front. Needs Cloudflare's **Add visitor location headers** managed transform (Rules → Transform Rules → Managed Transforms); until it is on, the panel stays empty and nothing else changes. |
+| Places | `CF-IPCity` / `CF-IPCountry` / `CF-IPLatitude` / `CF-IPLongitude`, read only when `DTCOM_TRUST_PROXY` says a proxy is in front. Needs Cloudflare's **Add visitor location headers** managed transform (Rules → Transform Rules → Managed Transforms); until it is on, the panel stays empty and nothing else changes. The coordinates are the city's centre as Cloudflare geolocated it, stored rounded to a tenth of a degree, and they draw the dots on the map. |
 | Typical time | Seconds the tab spent in the foreground, beaconed when it is hidden and summed server-side. The median, because one tab left open overnight would wreck a mean. A single report is capped at an hour — the number arrives from an unauthenticated endpoint, so it is a claim. Browsers that die without warning never report, so this reads low, never high. |
 
 Nothing here identifies a person: the address is only ever stored as a keyed HMAC, and the referrer is reduced to a site name before it is written.
+
+Each panel carries its own range selector, so a week of referrers can sit beside a year of views. The map above the Places list is `static/world.svg`, a Natural Earth 110m land outline (public domain) simplified to about 11 KB and cropped to 84N..56S. It is drawn as a CSS mask rather than an image, so it takes its colour from the theme, and every dot is positioned in percentages against that same crop.
 
 ## API tokens
 
