@@ -120,7 +120,18 @@ That renders `<script defer src="…" data-website-id="0e1f…"></script>` into 
 
 A `script_url` that isn't `http(s)` is refused on save, as is an attribute name containing anything but letters, digits and dashes — that name is written straight into the tag and, unlike a value, cannot be escaped after the fact.
 
-The built-in view counter keeps running alongside it. They are not measuring the same thing: this one counts one view per page, per address, per day, excludes bots and your own logged-in reads, and stores only a keyed hash of the address. A tracker sees sessions and referrers. The dashboard says which numbers it is showing.
+The built-in view counter keeps running alongside it, and answers most of what a tracker is usually installed for:
+
+| Dashboard number | Where it comes from |
+| --- | --- |
+| Views | One per page, per address, per day. Bots and your own logged-in reads are excluded. |
+| Unique visitors | Distinct address hashes. No session, no cookie, no identifier stored in the browser — so somebody whose address changes counts twice, and a household behind one address counts once. |
+| Pages each | Views ÷ visitors over the range. Not a session length: two visits a week apart from one address read as one visitor going further. |
+| Where from | The **hostname** of `document.referrer`, never the path or query — a search referrer's query string is the words somebody typed. Our own domain is dropped, so the list is arrivals, not internal navigation. |
+| Places | `CF-IPCity` / `CF-IPCountry`, read only when `DTCOM_TRUST_PROXY` says a proxy is in front. Needs Cloudflare's **Add visitor location headers** managed transform (Rules → Transform Rules → Managed Transforms); until it is on, the panel stays empty and nothing else changes. |
+| Typical time | Seconds the tab spent in the foreground, beaconed when it is hidden and summed server-side. The median, because one tab left open overnight would wreck a mean. A single report is capped at an hour — the number arrives from an unauthenticated endpoint, so it is a claim. Browsers that die without warning never report, so this reads low, never high. |
+
+Nothing here identifies a person: the address is only ever stored as a keyed HMAC, and the referrer is reduced to a site name before it is written.
 
 ## API tokens
 

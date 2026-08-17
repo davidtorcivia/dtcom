@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -185,6 +186,10 @@ func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var body struct {
 		Path string `json:"path"`
+		Ref  string `json:"ref"`
+		// Dwell is seconds of reading time; the beacon sends it when the tab
+		// goes away, so a page load and its dwell report arrive separately.
+		Dwell int `json:"dwell"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		return
@@ -192,7 +197,89 @@ func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 	if !d.trackablePath(body.Path) {
 		return
 	}
-	_ = d.Store.RecordView(body.Path, todayUTC(), d.hashIP(d.clientIP(r)))
+	ipHash := d.hashIP(d.clientIP(r))
+	if body.Dwell > 0 {
+		_ = d.Store.AddDwell(body.Path, todayUTC(), ipHash, min(body.Dwell, maxDwellSeconds))
+		return
+	}
+	country, city := d.clientPlace(r)
+	_ = d.Store.RecordView(store.View{
+		Path:     body.Path,
+		Day:      todayUTC(),
+		IPHash:   ipHash,
+		Referrer: d.referrerHost(body.Ref),
+		Country:  country,
+		City:     city,
+	})
+}
+
+// maxDwellSeconds caps a single reported reading time at an hour. The number
+// comes from an unauthenticated endpoint, so it is a claim, not a measurement:
+// without a cap one POST could make a page's typical time anything it liked.
+const maxDwellSeconds = 3600
+
+// referrerHost reduces a referrer to the site it names. Only the hostname is
+// kept — a full referrer URL carries the search terms someone typed and the
+// path they came from, which is more than a view count needs to know. Our own
+// hostname is dropped so internal navigation doesn't dominate the list.
+func (d *Deps) referrerHost(ref string) string {
+	if ref == "" || len(ref) > 2048 {
+		return ""
+	}
+	u, err := url.Parse(ref)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" || len(host) > 100 {
+		return ""
+	}
+	if self := d.siteHost(); self != "" && (host == self || strings.HasSuffix(host, "."+self)) {
+		return ""
+	}
+	return host
+}
+
+// siteHost is this site's own hostname, from the configured base URL.
+func (d *Deps) siteHost() string {
+	if d.Cfg == nil {
+		return ""
+	}
+	u, err := url.Parse(d.Cfg.BaseURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// clientPlace reads the visitor's country and city from the headers Cloudflare
+// adds ahead of the tunnel. They are only believed when a proxy is actually in
+// front (DTCOM_TRUST_PROXY); otherwise any client could label itself.
+//
+// City needs the "Add visitor location headers" managed transform switched on
+// in the Cloudflare dashboard. Until it is, only the country arrives, and both
+// being empty is a normal state this handles by storing nothing.
+func (d *Deps) clientPlace(r *http.Request) (country, city string) {
+	if d.Cfg == nil || !d.Cfg.TrustProxyHeaders {
+		return "", ""
+	}
+	return cleanPlace(r.Header.Get("CF-IPCountry")), cleanPlace(r.Header.Get("CF-IPCity"))
+}
+
+// cleanPlace bounds a geo header and strips control characters. The value is
+// rendered on the dashboard, so it is treated as untrusted text even though it
+// arrives from the proxy.
+func cleanPlace(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) > 64 {
+		return ""
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, v)
 }
 
 // trackablePath reports whether a beacon path names a page this site actually

@@ -16,6 +16,10 @@
 <span class="stat-label">Views today</span>
 </div>
 <div class="stat-card">
+<span class="stat-value">{{.AllVisitors}}</span>
+<span class="stat-label">Unique visitors</span>
+</div>
+<div class="stat-card">
 <span class="stat-value">{{.PostCount}}</span>
 <span class="stat-label">Published{{if .DraftCount}} <em>+{{.DraftCount}} draft</em>{{end}}</span>
 </div>
@@ -32,9 +36,17 @@
 <section class="panel">
 <div class="panel-head">
 <h3 class="panel-title">Views</h3>
-<nav class="range-tabs" aria-label="Chart range">
-{{range .ChartRanges}}<a href="{{.URL}}" class="range-tab{{if .Active}} is-active{{end}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
-</nav>
+{{/* A GET form, not a row of links: five ranges side by side ran off the edge
+     of a phone. The submit button is for the no-JS case; admin.js submits on
+     change and hides it. */}}
+<form class="range-picker" method="get" action="/admin">
+<input type="hidden" name="top" value="{{.TopRange.Key}}">
+<label class="admin-sr-only" for="chart-range">Chart range</label>
+<select id="chart-range" name="chart" class="range-select" data-autosubmit>
+{{range .ChartRanges}}<option value="{{.Key}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+</select>
+<button type="submit" class="admin-mini-btn range-go">Show</button>
+</form>
 </div>
 <p class="panel-summary">
 <strong>{{.ChartTotal}}</strong> views over {{.ChartRange.Label | lower}}{{if .ChartPeak}} <span class="dot-sep">·</span>
@@ -64,18 +76,60 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 <section class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Most read</h3>
-<nav class="range-tabs" aria-label="Most read range">
-{{range .TopRanges}}<a href="{{.URL}}" class="range-tab{{if .Active}} is-active{{end}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>{{end}}
-</nav>
+<form class="range-picker" method="get" action="/admin">
+<input type="hidden" name="chart" value="{{.ChartRange.Key}}">
+<label class="admin-sr-only" for="top-range">Most read range</label>
+<select id="top-range" name="top" class="range-select" data-autosubmit>
+{{range .TopRanges}}<option value="{{.Key}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+</select>
+<button type="submit" class="admin-mini-btn range-go">Show</button>
+</form>
 </div>
-<p class="panel-summary"><strong>{{.TopRangeSum}}</strong> views over {{.TopRange.Label | lower}}</p>
+<p class="panel-summary"><strong>{{.TopRangeSum}}</strong> views from <strong>{{.Visitors}}</strong> visitors over
+{{.TopRange.Label | lower}} <span class="dot-sep">·</span> <strong>{{.PagesEach}}</strong> pages each
+<span class="dot-sep">·</span> typically <strong>{{.Dwell}}</strong> on a page</p>
 {{if .TopPaths}}<ul class="bar-list">
 {{range .TopPaths}}<li>
-<span class="bar-label"><a href="{{.Path}}" target="_blank" rel="noopener">{{.Path}}</a></span>
+<span class="bar-label"><a href="{{.Path}}" target="_blank" rel="noopener" title="{{.Path}}">{{.Label}}</a></span>
 <span class="bar-track" title="{{.Share}}% of views in this range"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
 <span class="bar-value">{{.Count}}<span class="bar-share">{{.Share}}%</span></span>
 </li>{{end}}
 </ul>{{else}}<p class="admin-empty">Nothing read in this range.</p>{{end}}
+</section>
+
+{{/* Where from and Places follow the "most read" range rather than carrying
+     tabs of their own — they answer questions about the same window, and three
+     range selectors on one screen is three chances to misread which one is
+     which. */}}
+<section class="panel stats-column">
+<div class="panel-head">
+<h3 class="panel-title">Where from</h3>
+</div>
+<p class="panel-summary">Referring sites over {{.TopRange.Label | lower}}</p>
+{{if .Referrers}}<ul class="bar-list">
+{{range .Referrers}}<li>
+<span class="bar-label">{{.Label}}</span>
+<span class="bar-track" title="{{.Share}}% of views in this range"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
+<span class="bar-value">{{.Count}}<span class="bar-share">{{.Share}}%</span></span>
+</li>{{end}}
+</ul>{{else}}<p class="admin-empty">No referrals in this range. Visitors typing the address, opening a bookmark, or
+coming from an app that strips the referrer arrive without one.</p>{{end}}
+</section>
+
+<section class="panel stats-column">
+<div class="panel-head">
+<h3 class="panel-title">Places</h3>
+</div>
+<p class="panel-summary">Where visitors read from over {{.TopRange.Label | lower}}</p>
+{{if .Places}}<ul class="bar-list">
+{{range .Places}}<li>
+<span class="bar-label">{{.Label}}</span>
+<span class="bar-track" title="{{.Share}}% of views in this range"><span class="bar-fill" style="width:{{.Percent}}%"></span></span>
+<span class="bar-value">{{.Count}}<span class="bar-share">{{.Share}}%</span></span>
+</li>{{end}}
+</ul>{{else}}<p class="admin-empty">No locations recorded. These come from Cloudflare: turn on the
+<em>Add visitor location headers</em> managed transform (Rules → Transform Rules → Managed Transforms) and cities
+start arriving with the next views.</p>{{end}}
 </section>
 
 <section class="panel stats-column">
@@ -93,7 +147,8 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 <a href="{{.AnalyticsURL}}" target="_blank" rel="noopener">open its dashboard</a>{{end}}. The counts above are this
 site's own: one per page, per address, per day.</p>
 {{else}}<p class="admin-hint panel-foot">Counts are one per page, per address, per day, and exclude bots and your own
-logged-in visits. Add a third-party tracker on the <a href="/admin/site">Site</a> page for session-level detail.</p>{{end}}
+logged-in visits. Reading time is only counted while the tab is in front, and a browser that closes without warning
+never reports it — so it reads low, never high.</p>{{end}}
 </section>
 </div>
 </main>

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"davidtorcivia.com/dtcom/internal/store"
 )
 
 // dashboardFor renders /admin with the given query string as a logged-in
@@ -32,23 +34,27 @@ func dashboardFor(t *testing.T, d *testDeps, query string) string {
 func TestDashboardRangesRender(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	today := time.Now().UTC().Format("2006-01-02")
-	if err := d.deps.Store.RecordView("/posts/hello", today, "hash-a"); err != nil {
+	if err := d.deps.Store.RecordView(store.View{Path: "/posts/hello", Day: today, IPHash: "hash-a"}); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, r := range dashboardRanges {
-		body := dashboardFor(t, d, "?chart="+r.Key+"&top=30d")
-		if !strings.Contains(body, `href="/admin?chart=`+r.Key+`&amp;top=30d" class="range-tab is-active"`) {
-			t.Errorf("chart range %q did not render as the active tab", r.Key)
+		body := dashboardFor(t, d, "?chart="+r.Key+"&top=7d")
+		if !strings.Contains(body, `<option value="`+r.Key+`" selected>`) {
+			t.Errorf("chart range %q did not render as the selected option", r.Key)
 		}
-		// Switching the other selector must preserve this one.
-		if !strings.Contains(body, "chart="+r.Key+"&amp;top=7d") {
-			t.Errorf("chart range %q lost when offering the 7d most-read link", r.Key)
+		// Each picker submits only its own field, so the other one's current
+		// value has to travel as a hidden input or switching either resets it.
+		if !strings.Contains(body, `<input type="hidden" name="chart" value="`+r.Key+`">`) {
+			t.Errorf("chart range %q was not carried by the most-read picker", r.Key)
 		}
 
-		body = dashboardFor(t, d, "?chart=30d&top="+r.Key)
-		if !strings.Contains(body, `&amp;top=`+r.Key+`" class="range-tab is-active"`) {
-			t.Errorf("top range %q did not render as the active tab", r.Key)
+		body = dashboardFor(t, d, "?chart=7d&top="+r.Key)
+		if !strings.Contains(body, `<option value="`+r.Key+`" selected>`) {
+			t.Errorf("top range %q did not render as the selected option", r.Key)
+		}
+		if !strings.Contains(body, `<input type="hidden" name="top" value="`+r.Key+`">`) {
+			t.Errorf("top range %q was not carried by the chart picker", r.Key)
 		}
 	}
 }
@@ -58,10 +64,10 @@ func TestDashboardRangesRender(t *testing.T) {
 func TestDashboardUnknownRangeFallsBack(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	body := dashboardFor(t, d, "?chart=../etc&top=99y")
-	if !strings.Contains(body, `&amp;top=`+defaultTopRange+`" class="range-tab is-active"`) {
+	if !strings.Contains(body, `<input type="hidden" name="top" value="`+defaultTopRange+`">`) {
 		t.Errorf("unknown top range did not fall back to %s", defaultTopRange)
 	}
-	if !strings.Contains(body, `href="/admin?chart=`+defaultChartRange+`&amp;top=`+defaultTopRange+`" class="range-tab is-active"`) {
+	if !strings.Contains(body, `<input type="hidden" name="chart" value="`+defaultChartRange+`">`) {
 		t.Errorf("unknown chart range did not fall back to %s", defaultChartRange)
 	}
 }
@@ -77,7 +83,7 @@ func TestDashboardChartFillsQuietDays(t *testing.T) {
 		today.AddDate(0, 0, -7).Format("2006-01-02"),
 		today.Format("2006-01-02"),
 	} {
-		if err := d.deps.Store.RecordView("/posts/hello", day, "hash-a"); err != nil {
+		if err := d.deps.Store.RecordView(store.View{Path: "/posts/hello", Day: day, IPHash: "hash-a"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,10 +107,10 @@ func TestDashboardTopRangeScopesCounts(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	today := time.Now().UTC()
 	old := today.AddDate(0, 0, -60).Format("2006-01-02")
-	if err := d.deps.Store.RecordView("/posts/ancient", old, "hash-a"); err != nil {
+	if err := d.deps.Store.RecordView(store.View{Path: "/posts/ancient", Day: old, IPHash: "hash-a"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.deps.Store.RecordView("/posts/current", today.Format("2006-01-02"), "hash-a"); err != nil {
+	if err := d.deps.Store.RecordView(store.View{Path: "/posts/current", Day: today.Format("2006-01-02"), IPHash: "hash-a"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,7 +133,7 @@ func TestDashboardTopRangeScopesCounts(t *testing.T) {
 func TestDashboardMonthlyGrain(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	today := time.Now().UTC()
-	if err := d.deps.Store.RecordView("/posts/hello", today.AddDate(0, -6, 0).Format("2006-01-02"), "h"); err != nil {
+	if err := d.deps.Store.RecordView(store.View{Path: "/posts/hello", Day: today.AddDate(0, -6, 0).Format("2006-01-02"), IPHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
 

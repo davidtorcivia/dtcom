@@ -149,6 +149,20 @@
     }
   });
 
+  // --- Range pickers ------------------------------------------------------
+  //
+  // The range <select>s submit their form on change, which is what a dropdown
+  // that changes the view is expected to do. The form still has a submit
+  // button for the no-JS case; marking the form live hides it (CSS), so the
+  // button never sits there uselessly next to a select that already applied.
+  var pickers = document.querySelectorAll('.range-picker [data-autosubmit]');
+  for (var p = 0; p < pickers.length; p++) {
+    pickers[p].form.classList.add('is-live');
+    pickers[p].addEventListener('change', function (e) {
+      e.target.form.submit();
+    });
+  }
+
   // --- Chart tooltip ------------------------------------------------------
   //
   // The dashboard's bars carry their day and count in data-* attributes and a

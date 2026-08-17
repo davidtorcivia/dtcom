@@ -1,9 +1,9 @@
 package server
 
 import (
+	"cmp"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -186,7 +186,10 @@ func (d *Deps) adminLogout(w http.ResponseWriter, r *http.Request) {
 // barRow is a stats row scaled to the largest value in its set, so the
 // template can draw a proportional bar without doing arithmetic itself.
 type barRow struct {
-	Path    string
+	Path string
+	// Label is the row's text when it names something that is not a page — a
+	// referring site, a place — and so must not be rendered as a link.
+	Label   string
 	Day     string
 	Count   int64
 	Percent int
@@ -263,27 +266,19 @@ func (r dashboardRange) since(today time.Time, first string) string {
 	return today.AddDate(0, 0, -(r.Days - 1)).Format("2006-01-02")
 }
 
-// rangeOption is a range as the template draws it: a label, whether it is the
-// current one, and the URL that selects it while leaving the other chart alone.
+// rangeOption is a range as the template draws it: one <option> in a range
+// selector. It used to be a link per range, which on a phone was five tabs in
+// a row that ran off the side of the panel.
 type rangeOption struct {
 	Key    string
 	Label  string
 	Active bool
-	URL    string
 }
 
-func rangeOptions(param, selected, other, otherKey string) []rangeOption {
+func rangeOptions(selected string) []rangeOption {
 	out := make([]rangeOption, 0, len(dashboardRanges))
 	for _, r := range dashboardRanges {
-		q := url.Values{}
-		q.Set(param, r.Key)
-		q.Set(other, otherKey)
-		out = append(out, rangeOption{
-			Key:    r.Key,
-			Label:  r.Label,
-			Active: r.Key == selected,
-			URL:    "/admin?" + q.Encode(),
-		})
+		out = append(out, rangeOption{Key: r.Key, Label: r.Label, Active: r.Key == selected})
 	}
 	return out
 }
@@ -356,10 +351,12 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	for _, p := range topPaths {
 		maxPath = max(maxPath, p.Count)
 	}
+	titles := pageTitles(arts)
 	topRows := make([]barRow, 0, len(topPaths))
 	for _, p := range topPaths {
 		topRows = append(topRows, barRow{
 			Path:    p.Path,
+			Label:   cmp.Or(titles[p.Path], p.Path),
 			Count:   p.Count,
 			Percent: percentOf(p.Count, maxPath),
 			Share:   percentOf(p.Count, topTotal),
@@ -372,6 +369,34 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	todayCount, err := d.Store.TotalViews(todayStr)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	// The audience panels share the "most read" range, since they answer
+	// questions about the same window: who came, from where, and for how long.
+	visitors, err := d.Store.UniqueVisitors(topSince)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	referrers, err := d.Store.TopReferrers(topSince, maxDashboardRows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	places, err := d.Store.TopPlaces(topSince, maxDashboardRows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	dwell, err := d.Store.MedianDwell(topSince)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	allVisitors, err := d.Store.UniqueVisitors("")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -395,11 +420,17 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		"ChartStart":   chart.start,
 		"ChartEnd":     chart.end,
 		"ChartRange":   chartRange,
-		"ChartRanges":  rangeOptions("chart", chartRange.Key, "top", topRange.Key),
+		"ChartRanges":  rangeOptions(chartRange.Key),
 		"TopPaths":     topRows,
 		"TopRange":     topRange,
-		"TopRanges":    rangeOptions("top", topRange.Key, "chart", chartRange.Key),
+		"TopRanges":    rangeOptions(topRange.Key),
 		"TopRangeSum":  topTotal,
+		"Visitors":     visitors,
+		"AllVisitors":  allVisitors,
+		"PagesEach":    pagesEach(topTotal, visitors),
+		"Dwell":        humanDuration(dwell),
+		"Referrers":    labelRows(referrers, topTotal),
+		"Places":       labelRows(places, topTotal),
 		"AnalyticsOn":  d.Site() != nil && d.Site().Analytics.Enabled(),
 		"AnalyticsURL": analyticsDashboardURL(d.Site()),
 	}))
@@ -539,6 +570,59 @@ func percentOf(n, maxN int64) int {
 	}
 	p := int(n * 100 / maxN)
 	return max(2, p)
+}
+
+// pageTitles maps every path the beacon can record to what the page is called,
+// so "most read" reads like a list of writing rather than a list of URLs. A
+// path with no entry (a post deleted since it was read) falls back to itself.
+func pageTitles(arts []build.Article) map[string]string {
+	titles := map[string]string{"/": "Home", "/links": "Links", "/search": "Search"}
+	for _, a := range arts {
+		titles["/posts/"+a.Slug] = a.Title
+	}
+	return titles
+}
+
+// labelRows scales a set of counted labels against the busiest one, the same
+// way topRows does for paths.
+func labelRows(counts []store.LabelCount, total int64) []barRow {
+	var top int64
+	for _, c := range counts {
+		top = max(top, c.Count)
+	}
+	out := make([]barRow, 0, len(counts))
+	for _, c := range counts {
+		out = append(out, barRow{
+			Label:   c.Label,
+			Count:   c.Count,
+			Percent: percentOf(c.Count, top),
+			Share:   percentOf(c.Count, total),
+		})
+	}
+	return out
+}
+
+// pagesEach is views per visitor, to one decimal — how far into the site a
+// typical arrival got. It is not a session length: two visits a week apart from
+// the same address count as one visitor reading more, since nothing here
+// carries a session.
+func pagesEach(views, visitors int64) string {
+	if visitors <= 0 {
+		return "—"
+	}
+	return strconv.FormatFloat(float64(views)/float64(visitors), 'f', 1, 64)
+}
+
+// humanDuration renders seconds the way a person says them.
+func humanDuration(secs int64) string {
+	switch {
+	case secs <= 0:
+		return "—"
+	case secs < 60:
+		return strconv.FormatInt(secs, 10) + "s"
+	default:
+		return strconv.FormatInt(secs/60, 10) + "m " + strconv.FormatInt(secs%60, 10) + "s"
+	}
 }
 
 func (d *Deps) adminPostsList(w http.ResponseWriter, r *http.Request) {
