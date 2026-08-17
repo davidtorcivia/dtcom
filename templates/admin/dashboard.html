@@ -36,17 +36,7 @@
 <section class="panel">
 <div class="panel-head">
 <h3 class="panel-title">Views</h3>
-{{/* A GET form, not a row of links: five ranges side by side ran off the edge
-     of a phone. The submit button is for the no-JS case; admin.js submits on
-     change and hides it. */}}
-<form class="range-picker" method="get" action="/admin">
-<input type="hidden" name="top" value="{{.TopRange.Key}}">
-<label class="admin-sr-only" for="chart-range">Chart range</label>
-<select id="chart-range" name="chart" class="range-select" data-autosubmit>
-{{range .ChartRanges}}<option value="{{.Key}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
-</select>
-<button type="submit" class="admin-mini-btn range-go">Show</button>
-</form>
+{{template "range-picker" (index .Pickers "chart")}}
 </div>
 <p class="panel-summary">
 <strong>{{.ChartTotal}}</strong> views over {{.ChartRange.Label | lower}}{{if .ChartPeak}} <span class="dot-sep">·</span>
@@ -76,14 +66,7 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 <section class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Most read</h3>
-<form class="range-picker" method="get" action="/admin">
-<input type="hidden" name="chart" value="{{.ChartRange.Key}}">
-<label class="admin-sr-only" for="top-range">Most read range</label>
-<select id="top-range" name="top" class="range-select" data-autosubmit>
-{{range .TopRanges}}<option value="{{.Key}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
-</select>
-<button type="submit" class="admin-mini-btn range-go">Show</button>
-</form>
+{{template "range-picker" (index .Pickers "top")}}
 </div>
 <p class="panel-summary"><strong>{{.TopRangeSum}}</strong> views from <strong>{{.Visitors}}</strong> visitors over
 {{.TopRange.Label | lower}} <span class="dot-sep">·</span> <strong>{{.PagesEach}}</strong> pages each
@@ -97,15 +80,12 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 </ul>{{else}}<p class="admin-empty">Nothing read in this range.</p>{{end}}
 </section>
 
-{{/* Where from and Places follow the "most read" range rather than carrying
-     tabs of their own — they answer questions about the same window, and three
-     range selectors on one screen is three chances to misread which one is
-     which. */}}
 <section class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Where from</h3>
+{{template "range-picker" (index .Pickers "ref")}}
 </div>
-<p class="panel-summary">Referring sites over {{.TopRange.Label | lower}}</p>
+<p class="panel-summary">Referring sites over {{.RefRange.Label | lower}}</p>
 {{if .Referrers}}<ul class="bar-list">
 {{range .Referrers}}<li>
 <span class="bar-label">{{.Label}}</span>
@@ -119,8 +99,17 @@ coming from an app that strips the referrer arrive without one.</p>{{end}}
 <section class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Places</h3>
+{{template "range-picker" (index .Pickers "place")}}
 </div>
-<p class="panel-summary">Where visitors read from over {{.TopRange.Label | lower}}</p>
+<p class="panel-summary">Where visitors read from over {{.PlaceRange.Label | lower}}</p>
+{{/* The map repeats what the list below says, so it is hidden from screen
+     readers rather than read out twice as a pile of coordinates. Each dot is
+     placed in percentages, so it tracks the map at any panel width. */}}
+{{if .PlaceDots}}<div class="places-map" aria-hidden="true">
+<span class="places-land"></span>
+{{range .PlaceDots}}<span class="place-dot" style="left:{{.Left}}%;top:{{.Top}}%;width:{{.Size}}px;height:{{.Size}}px"
+  title="{{.Label}}: {{.Count}}"></span>{{end}}
+</div>{{end}}
 {{if .Places}}<ul class="bar-list">
 {{range .Places}}<li>
 <span class="bar-label">{{.Label}}</span>

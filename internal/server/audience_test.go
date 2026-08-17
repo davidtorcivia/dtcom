@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"davidtorcivia.com/dtcom/internal/store"
 )
 
 // beacon posts a /api/track body as an ordinary browser would, with optional
@@ -179,5 +181,76 @@ func TestDashboardShowsAudience(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("dashboard is missing %q", want)
 		}
+	}
+}
+
+// TestPlaceMapPlotsCoordinates: the map is the one place a stored coordinate
+// is used, so this covers the whole path from the proxy's headers to the dot's
+// position. Lisbon is 38.7N 9.1W, which on a map cropped to 84N..56S lands
+// about 48 percent across and 32 percent down.
+func TestPlaceMapPlotsCoordinates(t *testing.T) {
+	d := newTestDeps(t)
+	d.deps.Cfg.TrustProxyHeaders = true
+	beacon(t, d, `{"path":"/posts/hello"}`, map[string]string{
+		"CF-IPCity": "Lisbon", "CF-IPCountry": "PT",
+		"CF-IPLatitude": "38.7167", "CF-IPLongitude": "-9.1333",
+	})
+
+	points, err := d.deps.Store.PlacePoints("", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || points[0].Label != "Lisbon, PT" {
+		t.Fatalf("points = %+v", points)
+	}
+	dots := mapDots(points)
+	if len(dots) != 1 {
+		t.Fatalf("dots = %+v", dots)
+	}
+	if got := dots[0].Left; got < 47 || got > 48 {
+		t.Errorf("dot left = %.1f%%, want about 47.5%%", got)
+	}
+	if got := dots[0].Top; got < 32 || got > 33 {
+		t.Errorf("dot top = %.1f%%, want about 32.3%%", got)
+	}
+
+	page := dashboardFor(t, d, "")
+	if !strings.Contains(page, `class="places-map"`) || !strings.Contains(page, `class="place-dot"`) {
+		t.Error("the dashboard did not draw the map")
+	}
+}
+
+// TestCoordinatesRejectImpossibleValues: the headers are only as good as the
+// proxy, and a bad pair would drag a dot to a corner of the map rather than
+// showing nothing.
+func TestCoordinatesRejectImpossibleValues(t *testing.T) {
+	for _, tc := range []struct{ lat, lon string }{
+		{"91", "0"}, {"-90.1", "0"}, {"0", "181"}, {"0", "-200"},
+		{"NaN", "0"}, {"", ""}, {"north", "west"},
+	} {
+		d := newTestDeps(t)
+		d.deps.Cfg.TrustProxyHeaders = true
+		beacon(t, d, `{"path":"/posts/hello"}`, map[string]string{
+			"CF-IPLatitude": tc.lat, "CF-IPLongitude": tc.lon,
+		})
+		points, err := d.deps.Store.PlacePoints("", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(points) != 0 {
+			t.Errorf("lat %q lon %q was plotted: %+v", tc.lat, tc.lon, points)
+		}
+	}
+}
+
+// TestMapDotsSkipUncroppedLatitudes: the map has no Antarctica, so a point
+// below the crop has nowhere honest to go.
+func TestMapDotsSkipUncroppedLatitudes(t *testing.T) {
+	dots := mapDots([]store.Place{
+		{Label: "McMurdo", Lat: -77.8, Lon: 166.7, Count: 3},
+		{Label: "Longyearbyen", Lat: 78.2, Lon: 15.6, Count: 1},
+	})
+	if len(dots) != 1 || dots[0].Label != "Longyearbyen" {
+		t.Errorf("dots = %+v, want only Longyearbyen", dots)
 	}
 }

@@ -31,6 +31,22 @@
 </header>
 {{end}}
 
+{{/* range-picker draws one panel's range selector. A GET form rather than a
+     row of links: five ranges side by side ran off the edge of a phone. The
+     hidden fields carry the other panels' current ranges, since a form submits
+     only its own controls. The submit button is for the no-JS case; admin.js
+     submits on change and hides it. */}}
+{{define "range-picker"}}
+<form class="range-picker" method="get" action="/admin">
+{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+<label class="admin-sr-only" for="{{.ID}}">{{.Label}}</label>
+<select id="{{.ID}}" name="{{.Param}}" class="range-select" data-autosubmit>
+{{range .Options}}<option value="{{.Key}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+</select>
+<button type="submit" class="admin-mini-btn range-go">Show</button>
+</form>
+{{end}}
+
 {{define "admin-footer"}}
 </div>
 </body>

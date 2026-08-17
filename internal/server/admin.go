@@ -3,6 +3,7 @@ package server
 import (
 	"cmp"
 	"log/slog"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -275,10 +276,46 @@ type rangeOption struct {
 	Active bool
 }
 
-func rangeOptions(selected string) []rangeOption {
-	out := make([]rangeOption, 0, len(dashboardRanges))
-	for _, r := range dashboardRanges {
-		out = append(out, rangeOption{Key: r.Key, Label: r.Label, Active: r.Key == selected})
+// dashboardSelectors are the query parameters that each carry one panel's
+// range. They are independent: reading the last week of referrers while
+// looking at a year of views is a normal thing to want.
+var dashboardSelectors = []struct{ Param, ID, Label string }{
+	{"chart", "chart-range", "Chart range"},
+	{"top", "top-range", "Most read range"},
+	{"ref", "ref-range", "Referrers range"},
+	{"place", "place-range", "Places range"},
+}
+
+// rangePicker is one panel's selector as the template draws it.
+type rangePicker struct {
+	Param   string
+	ID      string
+	Label   string
+	Options []rangeOption
+	// Hidden carries every other selector's current key. Each picker submits
+	// only its own field, so without these the rest would fall back to their
+	// defaults the moment one of them changed.
+	Hidden []hiddenField
+}
+
+type hiddenField struct{ Name, Value string }
+
+// rangePickers builds every selector from the keys currently in force.
+func rangePickers(selected map[string]string) map[string]rangePicker {
+	out := make(map[string]rangePicker, len(dashboardSelectors))
+	for _, s := range dashboardSelectors {
+		p := rangePicker{Param: s.Param, ID: s.ID, Label: s.Label}
+		for _, r := range dashboardRanges {
+			p.Options = append(p.Options, rangeOption{
+				Key: r.Key, Label: r.Label, Active: r.Key == selected[s.Param],
+			})
+		}
+		for _, other := range dashboardSelectors {
+			if other.Param != s.Param {
+				p.Hidden = append(p.Hidden, hiddenField{Name: other.Param, Value: selected[other.Param]})
+			}
+		}
+		out[s.Param] = p
 	}
 	return out
 }
@@ -322,8 +359,11 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		firstDay = todayStr // nothing recorded yet; an empty window of one day
 	}
 
-	chartRange := lookupRange(r.URL.Query().Get("chart"), defaultChartRange)
-	topRange := lookupRange(r.URL.Query().Get("top"), defaultTopRange)
+	q := r.URL.Query()
+	chartRange := lookupRange(q.Get("chart"), defaultChartRange)
+	topRange := lookupRange(q.Get("top"), defaultTopRange)
+	refRange := lookupRange(q.Get("ref"), defaultTopRange)
+	placeRange := lookupRange(q.Get("place"), defaultTopRange)
 
 	chart, chartErr := d.viewsChart(chartRange, today, firstDay)
 	if chartErr != nil {
@@ -333,10 +373,7 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Most read, scaled against the busiest path and against the window's total
 	// so each row can show both its bar and its share.
-	topSince := topRange.since(today, firstDay)
-	if topRange.Days == 0 {
-		topSince = "" // all time: no lower bound at all
-	}
+	topSince := windowStart(topRange, today, firstDay)
 	topPaths, err := d.Store.TopPaths(topSince, maxDashboardRows)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -374,19 +411,9 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The audience panels share the "most read" range, since they answer
-	// questions about the same window: who came, from where, and for how long.
+	// Visitors and reading time belong to the most-read panel, which is where
+	// they are shown. Referrers and places each answer to their own selector.
 	visitors, err := d.Store.UniqueVisitors(topSince)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	referrers, err := d.Store.TopReferrers(topSince, maxDashboardRows)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	places, err := d.Store.TopPlaces(topSince, maxDashboardRows)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -402,6 +429,35 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refSince := windowStart(refRange, today, firstDay)
+	referrers, err := d.Store.TopReferrers(refSince, maxDashboardRows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	refTotal, err := d.Store.TotalViews(refSince)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	placeSince := windowStart(placeRange, today, firstDay)
+	places, err := d.Store.TopPlaces(placeSince, maxDashboardRows)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	placeTotal, err := d.Store.TotalViews(placeSince)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	points, err := d.Store.PlacePoints(placeSince, maxMapDots)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	d.adminTmpls.render(w, "dashboard", d.adminData("Dashboard", map[string]any{
 		"Site":       d.Site(),
 		"PostCount":  published,
@@ -411,26 +467,33 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		"Today":      todayCount,
 		"Recent":     recent,
 
-		"Chart":        chart.bars,
-		"ChartTotal":   chart.total,
-		"ChartPeak":    chart.peak,
-		"ChartPeakAt":  chart.peakAt,
-		"ChartMax":     chart.scale,
-		"ChartGrain":   chart.grain,
-		"ChartStart":   chart.start,
-		"ChartEnd":     chart.end,
-		"ChartRange":   chartRange,
-		"ChartRanges":  rangeOptions(chartRange.Key),
-		"TopPaths":     topRows,
-		"TopRange":     topRange,
-		"TopRanges":    rangeOptions(topRange.Key),
-		"TopRangeSum":  topTotal,
-		"Visitors":     visitors,
-		"AllVisitors":  allVisitors,
-		"PagesEach":    pagesEach(topTotal, visitors),
-		"Dwell":        humanDuration(dwell),
-		"Referrers":    labelRows(referrers, topTotal),
-		"Places":       labelRows(places, topTotal),
+		"Chart":       chart.bars,
+		"ChartTotal":  chart.total,
+		"ChartPeak":   chart.peak,
+		"ChartPeakAt": chart.peakAt,
+		"ChartMax":    chart.scale,
+		"ChartGrain":  chart.grain,
+		"ChartStart":  chart.start,
+		"ChartEnd":    chart.end,
+		"ChartRange":  chartRange,
+		"TopPaths":    topRows,
+		"TopRange":    topRange,
+		"TopRangeSum": topTotal,
+		"Visitors":    visitors,
+		"AllVisitors": allVisitors,
+		"PagesEach":   pagesEach(topTotal, visitors),
+		"Dwell":       humanDuration(dwell),
+		"RefRange":    refRange,
+		"Referrers":   labelRows(referrers, refTotal),
+		"PlaceRange":  placeRange,
+		"Places":      labelRows(places, placeTotal),
+		"PlaceDots":   mapDots(points),
+		"Pickers": rangePickers(map[string]string{
+			"chart": chartRange.Key,
+			"top":   topRange.Key,
+			"ref":   refRange.Key,
+			"place": placeRange.Key,
+		}),
 		"AnalyticsOn":  d.Site() != nil && d.Site().Analytics.Enabled(),
 		"AnalyticsURL": analyticsDashboardURL(d.Site()),
 	}))
@@ -570,6 +633,59 @@ func percentOf(n, maxN int64) int {
 	}
 	p := int(n * 100 / maxN)
 	return max(2, p)
+}
+
+// windowStart is the first day a panel's range covers, in the form the store's
+// queries want: the empty string for all time, which means no lower bound at
+// all rather than the first day anything was recorded.
+func windowStart(r dashboardRange, today time.Time, first string) string {
+	if r.Days == 0 {
+		return ""
+	}
+	return r.since(today, first)
+}
+
+// The map in the Places panel is static/world.svg used as a CSS mask, drawn in
+// the equirectangular projection its coordinates were generated in. These are
+// the bounds it was cropped to: Antarctica is gone, and the north stops above
+// Svalbard, which is as far as anybody reads from.
+const (
+	mapTopLat    = 84.0
+	mapBottomLat = -56.0
+	// maxMapDots bounds the query behind the map. Two hundred dots on a panel
+	// this size is already more overlap than signal.
+	maxMapDots = 200
+)
+
+// mapDot is one place on the map, positioned in percentages so the dots track
+// the map whatever width the panel ends up.
+type mapDot struct {
+	Left  float64
+	Top   float64
+	Size  int
+	Label string
+	Count int64
+}
+
+// mapDots projects place counts onto the map. Size grows with the square root
+// of the count, so a place with a hundred views reads as bigger than one with
+// four without swallowing the continent it sits on.
+func mapDots(places []store.Place) []mapDot {
+	out := make([]mapDot, 0, len(places))
+	for _, p := range places {
+		if p.Lat > mapTopLat || p.Lat < mapBottomLat {
+			continue // outside the crop; nowhere to draw it honestly
+		}
+		size := 4 + int(math.Sqrt(float64(p.Count)))
+		out = append(out, mapDot{
+			Left:  (p.Lon + 180) / 360 * 100,
+			Top:   (mapTopLat - p.Lat) / (mapTopLat - mapBottomLat) * 100,
+			Size:  min(size, 14),
+			Label: p.Label,
+			Count: p.Count,
+		})
+	}
+	return out
 }
 
 // pageTitles maps every path the beacon can record to what the page is called,

@@ -681,6 +681,49 @@ input[type="file"]:focus-visible::file-selector-button {
 
 
 /* --------------------------------------------------------------------------
+   Places map
+
+   The land is one SVG used as a mask rather than as an image, so the shape is
+   painted in a theme colour and needs no second copy for the dark palette. The
+   file is an equirectangular projection cropped to 84N..56S, which is what the
+   dot positions in the handler are computed against.
+   -------------------------------------------------------------------------- */
+
+.places-map {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 360 / 140;
+  margin: 0.75rem 0 0.25rem;
+}
+
+/* The land is its own layer so the mask clips the coastline and nothing else.
+   Dots drawn inside the masked element would be cut to the land, which sounds
+   right until a reader in Singapore or Malta disappears with the island the
+   simplification dropped. */
+.places-land {
+  position: absolute;
+  inset: 0;
+  /* The muted text colour at a third strength. --surface-hover is a hair off
+     the page background and left the continents nearly invisible. */
+  background: var(--text-muted);
+  opacity: 0.35;
+  -webkit-mask-image: url("/static/world.svg");
+  mask-image: url("/static/world.svg");
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.place-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--accent-yellow);
+  box-shadow: 0 0 0 1px var(--bg);
+}
+
+/* --------------------------------------------------------------------------
    Views chart
    -------------------------------------------------------------------------- */
 

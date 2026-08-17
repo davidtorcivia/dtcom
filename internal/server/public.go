@@ -2,10 +2,12 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -202,15 +204,12 @@ func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 		_ = d.Store.AddDwell(body.Path, todayUTC(), ipHash, min(body.Dwell, maxDwellSeconds))
 		return
 	}
-	country, city := d.clientPlace(r)
-	_ = d.Store.RecordView(store.View{
-		Path:     body.Path,
-		Day:      todayUTC(),
-		IPHash:   ipHash,
-		Referrer: d.referrerHost(body.Ref),
-		Country:  country,
-		City:     city,
-	})
+	place := d.clientPlace(r)
+	place.Path = body.Path
+	place.Day = todayUTC()
+	place.IPHash = ipHash
+	place.Referrer = d.referrerHost(body.Ref)
+	_ = d.Store.RecordView(place)
 }
 
 // maxDwellSeconds caps a single reported reading time at an hour. The number
@@ -252,18 +251,35 @@ func (d *Deps) siteHost() string {
 	return strings.ToLower(u.Hostname())
 }
 
-// clientPlace reads the visitor's country and city from the headers Cloudflare
-// adds ahead of the tunnel. They are only believed when a proxy is actually in
-// front (DTCOM_TRUST_PROXY); otherwise any client could label itself.
+// clientPlace reads the visitor's country, city and coordinates from the
+// headers Cloudflare adds ahead of the tunnel, as the location half of a view.
+// They are only believed when a proxy is actually in front
+// (DTCOM_TRUST_PROXY); otherwise any client could label itself.
 //
-// City needs the "Add visitor location headers" managed transform switched on
-// in the Cloudflare dashboard. Until it is, only the country arrives, and both
-// being empty is a normal state this handles by storing nothing.
-func (d *Deps) clientPlace(r *http.Request) (country, city string) {
+// Everything but the country needs the "Add visitor location headers" managed
+// transform switched on in the Cloudflare dashboard. Until it is, the fields
+// arrive empty, which is a normal state this handles by storing nothing.
+func (d *Deps) clientPlace(r *http.Request) store.View {
 	if d.Cfg == nil || !d.Cfg.TrustProxyHeaders {
-		return "", ""
+		return store.View{}
 	}
-	return cleanPlace(r.Header.Get("CF-IPCountry")), cleanPlace(r.Header.Get("CF-IPCity"))
+	return store.View{
+		Country: cleanPlace(r.Header.Get("CF-IPCountry")),
+		City:    cleanPlace(r.Header.Get("CF-IPCity")),
+		Lat:     coordinate(r.Header.Get("CF-IPLatitude"), 90),
+		Lon:     coordinate(r.Header.Get("CF-IPLongitude"), 180),
+	}
+}
+
+// coordinate parses a latitude or longitude header, returning 0 for anything
+// unparseable or out of range. The value is the centre of the visitor's city
+// as the proxy geolocated it, not a position the visitor reported.
+func coordinate(v string, limit float64) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil || math.IsNaN(f) || f < -limit || f > limit {
+		return 0
+	}
+	return f
 }
 
 // cleanPlace bounds a geo header and strips control characters. The value is
