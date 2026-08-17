@@ -282,7 +282,10 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
   margin-top: 1.5rem;
 }
 
-.stats-column { flex: 1; min-width: 280px; }
+/* Two panels to a row, one on a narrow screen. Plain `flex: 1` used to be
+   right when there were two of them; with four it packs all of them into one
+   row on a wide monitor and every bar list ends up too narrow to read. */
+.stats-column { flex: 1 1 calc(50% - 2rem); min-width: 280px; }
 
 .stats-column h3 {
   text-transform: uppercase;
@@ -493,13 +496,17 @@ input[type="file"]:focus-visible::file-selector-button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
-  background: var(--text-muted);
-  border: 1px solid var(--text-muted) !important;
   margin-bottom: 2.5rem;
 }
 
+/* Each card draws its own hairline, and adjacent hairlines share the 1px gap.
+   The rules used to be the container's background showing through the gaps,
+   which looked identical until the card count stopped filling the last row —
+   on a phone, five cards in two columns left a solid grey block where the
+   sixth would be. */
 .stat-card {
   background: var(--bg);
+  box-shadow: 0 0 0 1px var(--text-muted);
   padding: 1.1rem 1.2rem;
   display: flex;
   flex-direction: column;
@@ -643,22 +650,35 @@ input[type="file"]:focus-visible::file-selector-button {
 
 /* Range selector. Plain links, so switching a range is a navigation the back
    button understands and the whole thing works with scripting off. */
-.range-tabs { display: flex; gap: 1px; background: var(--text-muted); border: 1px solid var(--text-muted) !important; }
+/* One <select>, not a row of tabs: five ranges side by side is wider than a
+   phone and the last two used to sit off the edge of the panel. */
+.range-picker { display: flex; gap: 0.4rem; align-items: center; }
 
-.range-tab {
+.range-select {
   font-family: var(--font-sans);
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  padding: 0.25rem 0.6rem;
+  padding: 0.25rem 1.6rem 0.25rem 0.6rem;
   background: var(--bg);
-  color: var(--text-muted);
-  text-decoration: none;
-  white-space: nowrap;
+  color: var(--text);
+  border: 1px solid var(--text-muted);
+  border-radius: 0;
+  /* The native arrow is drawn here so the control keeps one look across
+     browsers; appearance:none removes the platform one. */
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 0.75rem center, right 0.5rem center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
 }
 
-.range-tab:hover { background: var(--surface-hover); color: var(--text); }
-.range-tab.is-active { background: var(--text); color: var(--bg); }
+.range-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Hidden once admin.js takes over submitting on change; see initRangePickers. */
+.range-picker.is-live .range-go { display: none; }
+
 
 /* --------------------------------------------------------------------------
    Views chart
@@ -941,9 +961,39 @@ input[type="file"]:focus-visible::file-selector-button {
   .bar-track { display: none; }
   .feed-url { max-width: 100%; }
   .panel-head { gap: 0.6rem; }
-  .range-tabs { width: 100%; }
-  .range-tab { flex: 1; text-align: center; padding: 0.3rem 0.35rem; }
+  .range-picker { width: 100%; }
+  .range-select { flex: 1; }
   .chart { height: 120px; }
+
+  /* Tables are the one thing on these pages that cannot be made to wrap: a
+     token digest, a URL template and a timestamp have no break points, so the
+     table takes its minimum width and pushes the whole page sideways with it.
+     display:block lets each one scroll inside its own box instead. */
+  .endpoint-table, .token-table { display: block; overflow-x: auto; }
+
+  /* The copy button is pinned to the top-right of a code block; on a wide
+     screen the first line ends well before it, on a phone it runs underneath.
+     Give the block a gutter to hold the button. */
+  .code-block { padding-top: 2.5rem; }
+
+  /* Add forms stack. Side by side, the URL field on a phone was narrow enough
+     that its placeholder was cut mid-word. */
+  .admin-add-form { flex-direction: column; align-items: stretch; }
+  .admin-add-form input,
+  .admin-add-form select,
+  .admin-add-form button { flex: none; width: 100%; min-width: 0; }
+
+  /* Touch targets. These are all text-sized controls — "delete", "revoke", the
+     nav — which is fine for a cursor and a coin toss for a thumb. */
+  .site-header .nav-right a,
+  .site-header .nav-link-btn { padding-block: 0.45rem; }
+  .admin-link-btn, .admin-cancel, .panel-more { padding-block: 0.5rem; }
+  /* Vertical padding on these stays off the layout (they are inline), so the
+     hit area grows without the rows moving apart. */
+  .bar-label a, .admin-list a { padding-block: 0.3rem; }
+  .editor-toolbar button { padding-block: 0.45rem; }
+  /* A 13px checkbox is the smallest target on any of these pages. */
+  .admin-checkbox input { width: 1.15rem; height: 1.15rem; }
 }
 
 /* --------------------------------------------------------------------------
@@ -1160,4 +1210,17 @@ input[type="file"]:focus-visible::file-selector-button {
 @media (max-width: 640px) {
   .backup-row-actions { flex-wrap: wrap; justify-content: flex-start; }
   .backup-table td:last-child { text-align: left; white-space: normal; }
+
+  /* Four columns in 390px gave every cell its own line break — a timestamp
+     over three lines, "6.9 KB" over two. Stacked, each archive is one block
+     and every value stays on one line. The headings go: a date, the word
+     "manual" and a file size say what they are. */
+  .backup-table thead { display: none; }
+  /* The tbody has to go block too, or the rows shrink to fit their content and
+     the separator under each one stops short of the page. */
+  .backup-table, .backup-table tbody { display: block; }
+  .backup-table tr { display: block; padding: 0.7rem 0; }
+  .backup-table td { display: block; padding: 0.1rem 0; border: none !important; }
+  .backup-table tbody tr { border-bottom: 1px dashed var(--text-muted) !important; }
+  .backup-table td.backup-row-actions { display: flex; margin-top: 0.5rem; }
 }
