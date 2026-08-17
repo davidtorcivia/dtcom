@@ -2,10 +2,12 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 )
 
@@ -166,6 +168,33 @@ func TestAdminSocialAddRemove(t *testing.T) {
 	}
 	if soc := d.site(t).Social; len(soc) != 1 || soc[0].Label != "Contact" {
 		t.Errorf("social = %+v", soc)
+	}
+}
+
+// Every offered icon has to survive the round trip from the editor's dropdown
+// to a rendered page. An icon that validates but renders as nothing leaves an
+// invisible gap where a link should be.
+func TestAdminSocialAcceptsEveryOfferedIcon(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+	for _, icon := range build.SocialIconNames() {
+		if rec := d.adminPost(t, "/admin/site/social/add", url.Values{
+			"label": {icon}, "href": {"https://example.com/" + icon}, "icon": {icon},
+		}); rec.Code != http.StatusSeeOther {
+			t.Errorf("icon %q: add = %d", icon, rec.Code)
+			continue
+		}
+		if err := d.deps.Engine.Rebuild(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec := httptest.NewRecorder()
+		d.mux.ServeHTTP(rec, req)
+		if !strings.Contains(rec.Body.String(), `href="https://example.com/`+icon+`"`) {
+			t.Errorf("icon %q: link missing from the rendered page", icon)
+		}
+		if n := strings.Count(rec.Body.String(), `class="social-icon"`); n == 0 {
+			t.Errorf("icon %q: rendered without any icon markup", icon)
+		}
 	}
 }
 
