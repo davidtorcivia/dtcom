@@ -95,8 +95,32 @@
     if (/bot|crawler|spider|slurp|googlebot|bingbot|duckduckbot|gptbot|claudebot|headlesschrome/i.test(navigator.userAgent || '')) {
       return;
     }
+    // The referring site travels with the view. The server keeps the hostname
+    // and throws the rest away.
+    beacon({ path: path, ref: document.referrer || '' });
+
+    // Reading time, counted only while the tab is actually visible and
+    // reported when it stops being — 'hidden' is the last moment a phone
+    // browser reliably runs script, and 'unload' has not been dependable for
+    // years. Time spent after a report is sent on the next one; the server
+    // adds them up.
+    var since = Date.now();
+    var spent = 0;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') {
+        spent += Math.round((Date.now() - since) / 1000);
+        if (spent > 0) {
+          beacon({ path: path, dwell: spent });
+          spent = 0;
+        }
+      }
+      since = Date.now();
+    });
+  }
+
+  function beacon(payload) {
     try {
-      navigator.sendBeacon('/api/track', new Blob([JSON.stringify({ path: path })], { type: 'application/json' }));
+      navigator.sendBeacon('/api/track', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
     } catch (e) {
       // A blocked beacon must never break the page.
     }

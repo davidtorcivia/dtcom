@@ -36,8 +36,9 @@
 
 <h3 class="admin-h3 admin-form-heading">Analytics</h3>
 <p class="admin-hint">An optional third-party tracker — Umami, Plausible, Fathom, GoatCounter. Leave the URL
-empty for none. The built-in view counter on the <a href="/admin">Dashboard</a> keeps running either way; it
-counts one view per page per address per day, which is a deliberately narrower number than a tracker's.</p>
+empty for none. The built-in counter on the <a href="/admin">Dashboard</a> keeps running either way, and covers
+visitors, referring sites, places and reading time without a cookie — a tracker adds identity across devices,
+which is the part this deliberately does not do.</p>
 <label class="admin-label" for="s-analytics-script">Script URL</label>
 <input id="s-analytics-script" name="analytics_script" value="{{$s.Analytics.ScriptURL}}" class="admin-input"
        placeholder="https://analytics.example.com/script.js" inputmode="url">

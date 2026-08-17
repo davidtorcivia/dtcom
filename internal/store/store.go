@@ -120,6 +120,44 @@ CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
 `
 
 func (s *Store) migrate() error {
-	_, err := s.conn().Exec(schema)
-	return err
+	if _, err := s.conn().Exec(schema); err != nil {
+		return err
+	}
+	// Columns added to views after the table shipped. CREATE TABLE above only
+	// runs on a fresh database, and the deployed one lives in a volume that
+	// outlives every release, so anything new has to arrive this way.
+	return s.addColumns("views", map[string]string{
+		"referrer": "TEXT NOT NULL DEFAULT ''",
+		"country":  "TEXT NOT NULL DEFAULT ''",
+		"city":     "TEXT NOT NULL DEFAULT ''",
+		"dwell":    "INTEGER NOT NULL DEFAULT 0",
+	})
+}
+
+// addColumns adds any of cols the table does not already have. SQLite has no
+// ADD COLUMN IF NOT EXISTS, and matching on the duplicate-column error text is
+// a promise about wording no driver makes, so the existing columns are read.
+func (s *Store) addColumns(table string, cols map[string]string) error {
+	rows, err := s.conn().Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return fmt.Errorf("inspect %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		delete(cols, name)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close() // the ALTERs below need the read to be finished
+	for name, decl := range cols {
+		if _, err := s.conn().Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + decl); err != nil {
+			return fmt.Errorf("add %s.%s: %w", table, name, err)
+		}
+	}
+	return nil
 }
