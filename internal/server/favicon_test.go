@@ -210,6 +210,31 @@ func TestFaviconAppearsInRenderedHead(t *testing.T) {
 	}
 }
 
+// The admin pages get the icon from the admin-header partial, but the login
+// page carries its own <head> and so has to be checked separately — it was the
+// one page still showing the built-in icon after an upload.
+func TestFaviconAppearsOnAdminPages(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+	if rec := d.adminUpload(t, "/admin/site/favicon", "favicon", "icon.png", testPNG(t)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("upload = %d", rec.Code)
+	}
+	url := d.favicon(t)
+
+	for _, path := range []string{"/admin/login", "/admin"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(adminCookie(t, d))
+		rec := httptest.NewRecorder()
+		d.mux.ServeHTTP(rec, req)
+		body := rec.Body.String()
+		if !strings.Contains(body, `<link rel="icon" href="`+url+`">`) {
+			t.Errorf("%s does not reference the uploaded favicon %q", path, url)
+		}
+		if strings.Contains(body, "/static/favicon.svg") {
+			t.Errorf("%s still links the built-in favicon after an upload", path)
+		}
+	}
+}
+
 // Tightening isSVG to require a well-formed parse must not start rejecting
 // real files. These are the shapes that actually turn up: the built-in icon,
 // an XML declaration, a DOCTYPE, and named entities.
