@@ -338,6 +338,14 @@ func writeFileAtomic(path string, data []byte) error {
 // updateArticle overwrites an existing post file (matched by slug) and
 // rebuilds. If in.Date is empty, the original date is preserved.
 func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
+	// Same lock as createArticle and deleteArticle, which mux.go has always
+	// claimed covered all three. It did not: this function looks the article
+	// up, overwrites its file and then renames it, so a create running
+	// concurrently could pass its "does this slug exist?" check against a path
+	// this one is about to move out from under it. Save-in-place makes
+	// concurrent writers ordinary rather than theoretical.
+	d.postMu.Lock()
+	defer d.postMu.Unlock()
 	a, err := d.findArticleBySlug(slug)
 	if err != nil {
 		return http.StatusInternalServerError, err

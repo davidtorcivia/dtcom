@@ -322,6 +322,7 @@ func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) 
 		<-timer.C
 	}
 	pending := false
+	var lastEvent time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -337,9 +338,18 @@ func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) 
 				}
 			}
 			pending = true
+			lastEvent = time.Now()
 			timer.Reset(rebuildDebounce)
 		case <-timer.C:
 			pending = false
+			// A save through the admin UI, the API or MCP writes the file and
+			// rebuilds before returning; fsnotify then reports that write
+			// here. Rebuilding again would render the identical site a second
+			// time on every save. A rebuild that began after the last event
+			// has already read it — see Engine.BuildStartedAt.
+			if engine.BuildStartedAt().After(lastEvent) {
+				continue
+			}
 			if err := engine.Rebuild(); err != nil {
 				slog.Warn("watcher-triggered rebuild", "err", err)
 			} else {

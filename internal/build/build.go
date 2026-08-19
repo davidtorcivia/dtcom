@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"davidtorcivia.com/dtcom/internal/assets"
@@ -40,6 +41,31 @@ type Engine struct {
 	tmpls  templateStore
 	assets *assets.Fingerprinter
 	images *ImageIndex
+
+	// buildStart is when the running (or most recent) rebuild began reading
+	// content, in Unix nanoseconds. See BuildStartedAt.
+	buildStart atomic.Int64
+}
+
+// BuildStartedAt reports when the running or most recent rebuild began reading
+// content. It is the zero time until the first rebuild.
+//
+// The file watcher uses it to drop work it does not need to do. A save through
+// the admin UI, the REST API or MCP writes the post file and rebuilds itself,
+// and fsnotify reports that same write a moment later — so every save used to
+// render the whole site twice. A rebuild that started after an event landed has
+// already read what the event was telling us about, and the second pass renders
+// byte-identical output.
+//
+// The clock is read before anything is loaded rather than after, so the
+// comparison errs towards rebuilding again: a redundant rebuild costs
+// milliseconds, a skipped one would serve stale HTML until the next write.
+func (e *Engine) BuildStartedAt() time.Time {
+	ns := e.buildStart.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 // Images is the engine's view of the images directory: which renditions exist
@@ -74,6 +100,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 func (e *Engine) Rebuild() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.buildStart.Store(time.Now().UnixNano())
 
 	// Templates are reloaded on every rebuild so an edit to templates/ takes
 	// effect without a restart — which is what the docker-compose bind mount
