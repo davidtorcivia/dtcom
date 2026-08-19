@@ -101,7 +101,10 @@ func registerImageTools(srv *mcp.Server, d *Deps) {
 		Name:        "add_image",
 		Annotations: writes("Add an image", false),
 		Description: "Store an image on the site and return the markdown line for it. Give " +
-			"either url (preferred) or data. The file is named by a hash of its contents, so " +
+			"either url (strongly preferred) or data. A base64 data payload has to survive the " +
+			"whole client-side path as tool arguments, which for anything past a few hundred " +
+			"kilobytes it usually does not — a picture already reachable over http should always " +
+			"go by url. The file is named by a hash of its contents, so " +
 			"uploading the same picture twice reuses one file, and responsive renditions are " +
 			"generated in the background." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args addImageArgs) (*mcp.CallToolResult, addImageResult, error) {

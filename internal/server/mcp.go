@@ -343,6 +343,25 @@ type searchArticlesArgs struct {
 	Query string `json:"query" jsonschema:"Search query."`
 }
 
+// patchArticleArgs is an edit that names only what changes. update_article
+// carries the whole body, which for a long post is tens of kilobytes on the
+// wire for a one-line correction — and the client relays in front of this
+// server are where those payloads go to die.
+type patchArticleArgs struct {
+	Slug    string `json:"slug" jsonschema:"Slug of the article to patch."`
+	Find    string `json:"find" jsonschema:"Exact text to find in the body. Must match exactly once unless all is set."`
+	Replace string `json:"replace" jsonschema:"Text to put in its place. Empty deletes the matched text."`
+	All     bool   `json:"all,omitempty" jsonschema:"Replace every occurrence instead of requiring exactly one."`
+}
+
+// patchResult reports how many places actually changed, which is the only way
+// a caller of the all form learns whether it hit one line or forty.
+type patchResult struct {
+	Slug         string `json:"slug"`
+	Status       string `json:"status"`
+	Replacements int    `json:"replacements"`
+}
+
 func registerArticleTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_articles",
@@ -418,6 +437,48 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 			return nil, articleResult{}, fmt.Errorf("update failed (%d): %w", status, err)
 		}
 		return nil, articleResult{Slug: args.Slug, Status: "updated"}, nil
+	})
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "patch_article",
+		Annotations: writes("Patch an article", false),
+		Description: "Replace one exact passage inside an article's body, leaving everything else alone. " +
+			"Prefer this over update_article for edits to an existing post: it sends only the text that " +
+			"changes rather than the whole body. find must match exactly once, or the call fails and " +
+			"nothing is written — pass all to replace every occurrence instead." + figureConventions,
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args patchArticleArgs) (*mcp.CallToolResult, patchResult, error) {
+		if args.Find == "" {
+			return nil, patchResult{}, errors.New("find is required")
+		}
+		a, err := d.findArticleBySlug(args.Slug)
+		if err != nil {
+			return nil, patchResult{}, err
+		}
+		if a == nil {
+			return nil, patchResult{}, fmt.Errorf("article %q not found", args.Slug)
+		}
+		// Refusing an ambiguous match is the whole safety story here: a body
+		// this caller cannot see, edited by a substring it guessed at, is
+		// exactly where a blind replace-all quietly mangles a post.
+		n := strings.Count(a.Body, args.Find)
+		switch {
+		case n == 0:
+			return nil, patchResult{}, fmt.Errorf("find text does not appear in %q", args.Slug)
+		case n > 1 && !args.All:
+			return nil, patchResult{}, fmt.Errorf(
+				"find text appears %d times in %q; give more surrounding text to pin one, or set all", n, args.Slug)
+		}
+		status, err := d.updateArticle(args.Slug, articleInput{
+			Title:       a.Title,
+			Description: a.Description,
+			Tags:        a.Tags,
+			Body:        strings.ReplaceAll(a.Body, args.Find, args.Replace),
+			Draft:       a.Draft,
+		})
+		if err != nil {
+			return nil, patchResult{}, fmt.Errorf("patch failed (%d): %w", status, err)
+		}
+		return nil, patchResult{Slug: args.Slug, Status: "patched", Replacements: n}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{

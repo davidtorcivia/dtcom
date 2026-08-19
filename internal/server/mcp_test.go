@@ -183,6 +183,52 @@ func TestMCPUpdateArticleOmittedVsEmpty(t *testing.T) {
 	}
 }
 
+// patch_article is the small-payload write path, and the thing that makes it
+// safe to use blind is that an ambiguous find is refused rather than guessed at.
+func TestMCPPatchArticleRequiresUniqueMatch(t *testing.T) {
+	d := newTestDeps(t)
+
+	call := func(id int64, tool, args string) *httptest.ResponseRecorder {
+		t.Helper()
+		payload := `{"jsonrpc":"2.0","id":` + itoa(id) + `,"method":"tools/call","params":{"name":"` + tool +
+			`","arguments":` + args +
+			`,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+		rec := mcpPost(t, d, payload, map[string]string{
+			"Mcp-Protocol-Version": "2026-07-28",
+			"Mcp-Method":           "tools/call",
+			"Mcp-Name":             tool,
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body: %s", tool, rec.Code, rec.Body.String())
+		}
+		return rec
+	}
+
+	call(1, "create_article", `{"title":"Patch Me","body":"alpha beta\n\nalpha gamma"}`)
+
+	// Two occurrences with no all flag: refused, and nothing written.
+	got := call(2, "patch_article", `{"slug":"patch-me","find":"alpha","replace":"delta"}`).Body.String()
+	if !containsStr(got, "appears 2 times") {
+		t.Errorf("ambiguous find was not refused; body:\n%s", got)
+	}
+	if body := call(3, "get_article", `{"slug":"patch-me"}`).Body.String(); !containsStr(body, "alpha beta") {
+		t.Errorf("refused patch still wrote; body:\n%s", body)
+	}
+
+	// A find that pins one of them replaces just that one.
+	call(4, "patch_article", `{"slug":"patch-me","find":"alpha beta","replace":"delta beta"}`)
+	got = call(5, "get_article", `{"slug":"patch-me"}`).Body.String()
+	if !containsStr(got, "delta beta") || !containsStr(got, "alpha gamma") {
+		t.Errorf("unique patch did not land cleanly; body:\n%s", got)
+	}
+
+	// A find that is not there at all is an error, not a silent no-op.
+	got = call(6, "patch_article", `{"slug":"patch-me","find":"nowhere","replace":"x"}`).Body.String()
+	if !containsStr(got, "does not appear") {
+		t.Errorf("missing find was not reported; body:\n%s", got)
+	}
+}
+
 func containsStr(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
 }
