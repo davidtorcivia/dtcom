@@ -56,6 +56,12 @@ type storedImage struct {
 	Bytes int64  `json:"bytes"`
 }
 
+// Wrapped in an object for the reason given beside articleListResult in
+// mcp.go: a bare array is not a legal structuredContent shape.
+type imageListResult struct {
+	Images []storedImage `json:"images" jsonschema:"Images already uploaded, by URL."`
+}
+
 type addImageArgs struct {
 	URL string `json:"url,omitempty" jsonschema:"Public http(s) URL to download the image from. Preferred: it costs a few tokens where data costs millions. Private and loopback addresses are refused."`
 	// Offered because some clients hold bytes with nowhere to put them, and
@@ -83,12 +89,12 @@ func registerImageTools(srv *mcp.Server, d *Deps) {
 		Description: "List the images already uploaded to the site, so a post can reference one " +
 			"without uploading it again. Renditions and generated variants are not listed — only " +
 			"the originals, which are the URLs a post should use." + figureConventions,
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args listImagesArgs) (*mcp.CallToolResult, []storedImage, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args listImagesArgs) (*mcp.CallToolResult, imageListResult, error) {
 		imgs, err := d.listStoredImages(args.Query)
 		if err != nil {
-			return nil, nil, err
+			return nil, imageListResult{}, err
 		}
-		return nil, imgs, nil
+		return nil, imageListResult{Images: imgs}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{

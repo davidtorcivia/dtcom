@@ -313,6 +313,55 @@ func jsonRPCResult(t *testing.T, body string) []byte {
 // rather than a tool error — the client gets no result at all. It is also easy
 // to trip over: a nil Go map is not a JSON object, which is exactly how
 // get_site broke the first time these schemas were turned on.
+// Every outputSchema has to describe an object. MCP defines structuredContent
+// as an object, so a tool whose schema is a top-level array is not merely
+// unusual: Claude Desktop rejects the tools/list response with "Invalid result
+// for tools/list", naming the offending tool by its index, and refuses to load
+// the server at all. The Go SDK derives the schema from the handler's return
+// type, which makes this a one-character mistake away at every list-shaped
+// tool, so it is checked for all of them at once.
+func TestMCPOutputSchemasAreObjects(t *testing.T) {
+	d := newTestDeps(t)
+
+	rec := mcpPost(t, d,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
+		map[string]string{"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/list"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var listed struct {
+		Tools []struct {
+			Name         string          `json:"name"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(jsonRPCResult(t, rec.Body.String()), &listed); err != nil {
+		t.Fatalf("decode tools/list: %v", err)
+	}
+	if len(listed.Tools) == 0 {
+		t.Fatal("no tools listed")
+	}
+	for i, tool := range listed.Tools {
+		if len(tool.OutputSchema) == 0 {
+			continue // a tool may legitimately declare no structured output
+		}
+		var schema struct {
+			Type any `json:"type"`
+		}
+		if err := json.Unmarshal(tool.OutputSchema, &schema); err != nil {
+			t.Errorf("tool %d (%s): outputSchema is not an object: %v", i, tool.Name, err)
+			continue
+		}
+		// The SDK writes ["null","array"] for a slice return, so the check has
+		// to reject a list of types as well as a plain wrong one.
+		if s, ok := schema.Type.(string); !ok || s != "object" {
+			t.Errorf("tool %d (%s): outputSchema.type = %v, want \"object\"; a bare array cannot be structuredContent",
+				i, tool.Name, schema.Type)
+		}
+	}
+}
+
 func TestMCPToolOutputValidates(t *testing.T) {
 	d := newTestDeps(t)
 

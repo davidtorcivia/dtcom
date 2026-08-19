@@ -348,12 +348,12 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		Name:        "list_articles",
 		Annotations: reads("List articles"),
 		Description: "List all articles with slug, title, date, draft status, and description.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, []articleSummary, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, articleListResult, error) {
 		arts, err := build.LoadArticles(d.postsDir())
 		if err != nil {
-			return nil, nil, err
+			return nil, articleListResult{}, err
 		}
-		return nil, artSummaries(arts), nil
+		return nil, articleListResult{Articles: artSummaries(arts)}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -436,12 +436,15 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		Name:        "search_articles",
 		Annotations: reads("Search articles"),
 		Description: "Full-text search across article titles, bodies, and tags.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args searchArticlesArgs) (*mcp.CallToolResult, []store.SearchHit, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args searchArticlesArgs) (*mcp.CallToolResult, searchResult, error) {
 		hits, err := d.Store.SearchArticles(args.Query, 20)
 		if err != nil {
-			return nil, nil, err
+			return nil, searchResult{}, err
 		}
-		return nil, hits, nil
+		if hits == nil {
+			hits = []store.SearchHit{}
+		}
+		return nil, searchResult{Results: hits}, nil
 	})
 }
 
@@ -464,12 +467,15 @@ func registerLinkTools(srv *mcp.Server, d *Deps) {
 		Name:        "list_links",
 		Annotations: reads("List links"),
 		Description: "List all links (manual + RSS-imported), newest first.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, []store.Link, error) {
+	}, func(ctx context.Context, req *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, linkListResult, error) {
 		links, err := d.Store.ListLinks(500)
 		if err != nil {
-			return nil, nil, err
+			return nil, linkListResult{}, err
 		}
-		return nil, links, nil
+		if links == nil {
+			links = []store.Link{}
+		}
+		return nil, linkListResult{Links: links}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -613,6 +619,28 @@ func registerOpsTools(srv *mcp.Server, d *Deps) {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+// The list-shaped results are wrapped in an object rather than returned as a
+// bare slice, because MCP's structuredContent is defined as an object and a
+// tool whose outputSchema is a top-level array is rejected outright: Claude
+// Desktop reports "Invalid result for tools/list" and refuses to load the whole
+// server, naming the offending tool by index. The Go SDK derives the schema
+// from the handler's return type, so the shape has to be fixed here.
+//
+// The slices are always allocated, never nil, so an empty result serializes as
+// [] rather than null and matches the array the schema promises.
+
+type articleListResult struct {
+	Articles []articleSummary `json:"articles" jsonschema:"Every article, newest first."`
+}
+
+type searchResult struct {
+	Results []store.SearchHit `json:"results" jsonschema:"Matching articles, best match first."`
+}
+
+type linkListResult struct {
+	Links []store.Link `json:"links" jsonschema:"Every link, newest first."`
+}
 
 // artSummaries projects articles to the same shape the REST list endpoint
 // emits, so the two surfaces agree.
