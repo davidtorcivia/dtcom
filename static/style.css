@@ -164,6 +164,16 @@ body {
   color: #111111;
 }
 
+/* Checkboxes came out of the box in the browser's own blue, which belongs to
+   no part of this palette. One property re-tints the native widget in both
+   themes and keeps its focus ring, hover state and checkmark contrast — all of
+   which drawing our own control from scratch would have to reimplement.
+   The disabled boxes markdown task lists produce ignore this; they are drawn
+   further down, under .article-prose-body. */
+input[type="checkbox"] {
+  accent-color: var(--accent-yellow);
+}
+
 /* BASE LINK STYLING */
 a {
   color: var(--text);
@@ -864,6 +874,36 @@ mark, .highlight {
 
 .article-prose-body li {
   margin-bottom: 0.5rem;
+}
+
+/* Markdown task lists — `- [x] done`. goldmark renders each item as a disabled
+   <input type="checkbox">, which every browser greys out and paints in its own
+   colours whatever accent-color says, so this is the one checkbox on the site
+   that has to be drawn by hand. A filled square for done, an empty one for not:
+   the same yellow-on-paper the buttons and the selection use, no glyph and no
+   font to depend on.
+
+   goldmark tags neither the list nor the item, so the bullet is removed by
+   matching the item that contains the box rather than by a class. */
+.article-prose-body li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
+.article-prose-body input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.35em;
+  margin-left: -1.35em;
+  vertical-align: baseline;
+  background: var(--bg);
+  border: 1px solid var(--text-muted) !important;
+}
+
+.article-prose-body input[type="checkbox"]:checked {
+  background: var(--accent-yellow);
+  border-color: var(--accent-yellow) !important;
 }
 
 /* STACKED CARD TABLE SOLUTION FOR MOBILE */
