@@ -53,6 +53,13 @@ func decodeJSON(r *http.Request, v any) error {
 	return dec.Decode(v)
 }
 
+// wantsJSON reports whether the caller asked for a JSON answer rather than a
+// page. The admin UI is served as HTML to a browser navigating to it and as
+// JSON to the editor's own fetch calls, and this is what tells the two apart.
+func wantsJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json")
+}
+
 // bearerToken extracts the credential from an Authorization header.
 func bearerToken(r *http.Request) string {
 	v := strings.TrimSpace(r.Header.Get("Authorization"))

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -152,6 +153,114 @@ func TestAdminPostSaveNew(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "Created via admin.") {
 		t.Errorf("saved file missing body:\n%s", b)
+	}
+}
+
+// The editor saves over fetch and stays in the post, so the response has to
+// carry the slug rather than a redirect. On a new post that slug is the only
+// thing standing between the second save and a collision with the file the
+// first one created.
+func TestAdminPostSaveInPlaceReturnsSlug(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+	rec := httptest.NewRecorder()
+	_ = d.deps.Auth.SetSession(rec, "admin")
+	cookie := rec.Result().Cookies()[0]
+
+	save := func(slug, title string) *httptest.ResponseRecorder {
+		t.Helper()
+		form := url.Values{
+			"slug": {slug}, "title": {title}, "date": {"2026-03-01"},
+			"body": {"Saved without leaving the editor."},
+		}
+		req := httptest.NewRequest(http.MethodPost, "/admin/posts/save", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Accept", "application/json")
+		req.AddCookie(cookie)
+		out := httptest.NewRecorder()
+		d.mux.ServeHTTP(out, req)
+		return out
+	}
+
+	rec = save("", "In Place")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	var body struct{ Slug string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	if body.Slug != "in-place" {
+		t.Fatalf("slug = %q, want in-place", body.Slug)
+	}
+
+	// The second save carries the slug back, so it must update that file
+	// rather than trying to create a second one.
+	if rec := save(body.Slug, "In Place, Retitled"); rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	matches, _ := filepath.Glob(filepath.Join(d.deps.Cfg.ContentDir, "posts", "*in-place*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one file for the post, got %v", matches)
+	}
+	b, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "In Place, Retitled") {
+		t.Errorf("second save did not land:\n%s", b)
+	}
+}
+
+// A save that cannot land has to say why. The editor shows the message beside
+// the Save button, which is the only thing telling the author which field to
+// fix — a generic status text would leave them guessing.
+func TestAdminPostSaveInPlaceReportsError(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+	rec := httptest.NewRecorder()
+	_ = d.deps.Auth.SetSession(rec, "admin")
+	cookie := rec.Result().Cookies()[0]
+
+	form := url.Values{"slug": {""}, "title": {""}, "body": {"no title"}}
+	req := httptest.NewRequest(http.MethodPost, "/admin/posts/save", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	var body struct{ Error string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	if !strings.Contains(body.Error, "slug") {
+		t.Errorf("error = %q, want it to name the problem", body.Error)
+	}
+}
+
+// An expired session used to answer a save with 303 to the login page, which
+// for a fetch means the POST body — the post — vanished into a redirect the
+// editor could not distinguish from success. A navigation still gets the login
+// page; a fetch gets a status it can report.
+func TestAdminUnauthedSaveIs401ForFetch(t *testing.T) {
+	d := newTestDeps(t)
+	form := strings.NewReader("title=x&body=y")
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/posts/save", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	rec := httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("fetch save = %d, want 401", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/admin/posts/new", nil)
+	rec = httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("navigation = %d, want 303 to the login page", rec.Code)
 	}
 }
 

@@ -217,11 +217,21 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
    Obsidian-style editor
    -------------------------------------------------------------------------- */
 
+/* Sticky because the textarea now grows to its content: on a long post the
+   toolbar would otherwise be thousands of pixels above the line being written,
+   so checking the rendering meant scrolling to the top and back. It also makes
+   carrying the reading position across the Write/Preview switch worth doing —
+   without it you were always at the top when you pressed the button. */
 .editor-toolbar {
   display: flex;
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  padding-block: 0.5rem;
   margin-bottom: 0.5rem;
 }
 
@@ -239,19 +249,56 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
   font-weight: 700;
 }
 
+/* Word count sits against the right edge and the transient messages — saved
+   at, uploading, unsaved — line up after it. The count is the stable one, so
+   it takes the free space and the status grows leftward from the corner. */
+.editor-count {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .editor-status {
   font-family: var(--font-sans);
   font-size: 0.75rem;
   color: var(--text-muted);
-  margin-left: auto;
 }
 
 .editor-status.is-error { color: var(--accent); }
+
+/* Offered when this browser is holding a draft the server did not render —
+   the tab died, the machine went down, or the session expired mid-post. */
+.editor-restore {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--surface-hover);
+  border-left: 4px solid var(--accent-yellow) !important;
+}
+
+/* display:flex beats the UA stylesheet's [hidden] { display: none }, so the
+   bar has to opt back out explicitly — without this it shows on every load
+   whether or not there is a draft to restore, and clicking Restore leaves it
+   on screen. */
+.editor-restore[hidden] { display: none; }
+
+.editor-restore-text { margin-right: auto; }
 
 .editor-write {
   min-height: 400px;
   line-height: 1.6;
   padding: 0.75rem;
+  /* editor.js sets an explicit height from the content on every keystroke, so
+     the box never scrolls on its own — the page does. Hiding the overflow
+     stops a scrollbar flickering in during the frame the height is measured. */
+  overflow-y: hidden;
 }
 
 .editor-write.is-dragover {

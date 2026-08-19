@@ -62,6 +62,15 @@ func (d *Deps) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			// no-store so a browser never serves a cached admin page to the
 			// next person at the machine.
 			w.Header().Set("Cache-Control", "no-store")
+			// A 303 to the login page is right for a navigation and wrong for
+			// a fetch: the editor saves in place, and redirecting its POST
+			// meant an expired session swallowed the body — the author's post
+			// — and answered with the login page's HTML. A 401 lets the editor
+			// say so and keep the draft on screen.
+			if wantsJSON(r) {
+				writeError(w, http.StatusUnauthorized, nil)
+				return
+			}
 			http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 			return
 		}
@@ -802,19 +811,51 @@ func (d *Deps) adminPostSave(w http.ResponseWriter, r *http.Request) {
 	// Editing an existing post: reuse its slug and overwrite its source file.
 	if origSlug != "" {
 		if _, err := d.updateArticle(origSlug, in); err != nil {
-			d.renderPostEditError(w, in, origSlug, err)
+			d.postSaveFailed(w, r, in, origSlug, err)
 			return
 		}
-		http.Redirect(w, r, "/admin/posts", http.StatusSeeOther)
+		d.postSaveOK(w, r, origSlug)
 		return
 	}
 
 	// New post: slugify the title and create.
-	if _, _, err := d.createArticle(in); err != nil {
-		d.renderPostEditError(w, in, "", err)
+	slug, _, err := d.createArticle(in)
+	if err != nil {
+		d.postSaveFailed(w, r, in, "", err)
+		return
+	}
+	d.postSaveOK(w, r, slug)
+}
+
+// postSaveOK answers a save that landed. The editor saves in place over fetch
+// and asks for JSON, so it gets the slug back rather than a redirect that would
+// throw the author out of the post they are still writing.
+//
+// The slug is the point of the response, not a courtesy: a new post has none
+// until the file is created, and without writing it back into the form the
+// second save would take the create path again and collide with the file the
+// first one just wrote.
+func (d *Deps) postSaveOK(w http.ResponseWriter, r *http.Request, slug string) {
+	if wantsJSON(r) {
+		writeJSON(w, http.StatusOK, map[string]string{"slug": slug})
 		return
 	}
 	http.Redirect(w, r, "/admin/posts", http.StatusSeeOther)
+}
+
+// postSaveFailed answers a save that did not land, without losing the draft on
+// either path: the fetch gets the reason to show beside the Save button, a
+// plain form post gets the editor re-rendered with everything still in it.
+func (d *Deps) postSaveFailed(w http.ResponseWriter, r *http.Request, in articleInput, slug string, cause error) {
+	if wantsJSON(r) {
+		slog.Warn("admin post save failed", "slug", slug, "err", cause)
+		// The message names the field to fix ("title is required", "article
+		// %q already exists"), and the only person who reaches this is the
+		// author — the same audience renderPostEditError already shows it to.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": cause.Error()})
+		return
+	}
+	d.renderPostEditError(w, in, slug, cause)
 }
 
 // renderPostEditError re-renders the editor with the submitted values intact

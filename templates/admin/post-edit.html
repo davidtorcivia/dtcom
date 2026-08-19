@@ -21,17 +21,31 @@
 <button type="button" data-mode="write" class="active" aria-pressed="true">Write</button>
 <button type="button" data-mode="preview" aria-pressed="false">Preview</button>
 <button type="button" data-action="image">Insert image</button>
+{{/* The theme-swapping figure is two tagged URLs in one paragraph — easy to
+     write and impossible to remember, so the button writes it. */}}
+<button type="button" data-action="pair">Light/dark pair</button>
 <input type="file" class="editor-file" accept="image/*" hidden>
+<input type="file" class="editor-pair-file" accept="image/*" multiple hidden>
+<span class="editor-count"></span>
 <span class="editor-status" role="status" aria-live="polite"></span>
+</div>
+{{/* Shown by editor.js only when the browser is holding a draft that differs
+     from what the server just rendered — a crash, a closed tab, or a session
+     that expired mid-post. Hidden and inert otherwise. */}}
+<div class="editor-restore" role="alert" hidden>
+<span class="editor-restore-text"></span>
+<button type="button" data-action="restore" class="admin-mini-btn">Restore</button>
+<button type="button" data-action="discard" class="admin-mini-btn">Discard</button>
 </div>
 <label class="admin-label admin-sr-only" for="f-body">Body (markdown)</label>
 <textarea id="f-body" name="body" class="editor-write admin-mono">{{with $a}}{{.Body}}{{end}}</textarea>
 <div class="editor-preview article-prose-body" hidden></div>
 <p class="admin-hint">Drag an image in, or paste one, to upload it — the cursor lands in the <code>![]</code> brackets so you can type a caption straight away. An image on its own line renders with that caption beneath it. Ctrl/⌘+S saves.</p>
-<p class="admin-hint">For a figure that changes with the theme, upload both and tag the URLs — two lines, one caption, swapped by the theme toggle:<br>
+<p class="admin-hint">For a figure that changes with the theme, press <strong>Light/dark pair</strong> and select both files at once — filenames containing <code>light</code> and <code>dark</code> are sorted out for you, and the status line says which went where. It writes both lines into one paragraph, which is what makes them a single swapping figure; the caption on the first covers both:<br>
 <code>![The transfer function](/images/fig-light.png#light)</code><br>
-<code>![The transfer function](/images/fig-dark.png#dark)</code></p>
-<p class="admin-hint editor-shortcuts">Select text, then: <kbd>Ctrl/⌘</kbd>+<kbd>B</kbd> bold · <kbd>I</kbd> italic · <kbd>E</kbd> code · <kbd>K</kbd> link · <kbd>Shift</kbd>+<kbd>X</kbd> strikethrough · <kbd>Shift</kbd>+<kbd>H</kbd> highlight. Pressing again removes it.</p>
+<code>![](/images/fig-dark.png#dark)</code></p>
+<p class="admin-hint editor-shortcuts">Select text, then: <kbd>Ctrl/⌘</kbd>+<kbd>B</kbd> bold · <kbd>I</kbd> italic · <kbd>E</kbd> code · <kbd>K</kbd> link · <kbd>Shift</kbd>+<kbd>X</kbd> strikethrough · <kbd>Shift</kbd>+<kbd>H</kbd> highlight · <kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>6</kbd> heading. Pressing again removes it.</p>
+<p class="admin-hint">In a list, <kbd>Enter</kbd> starts the next item and <kbd>Tab</kbd>/<kbd>Shift</kbd>+<kbd>Tab</kbd> nests it; <kbd>Enter</kbd> on an empty item steps back out. <kbd>Shift</kbd>+<kbd>Enter</kbd> is a plain newline. Saving keeps you in the post, and unsaved changes are held in this browser until they are.</p>
 </div>
 <div class="admin-actions">
 <button type="submit" class="admin-btn">Save</button>
