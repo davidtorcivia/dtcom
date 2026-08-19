@@ -24,10 +24,16 @@
 {{/* The theme-swapping figure is two tagged URLs in one paragraph — easy to
      write and impossible to remember, so the button writes it. */}}
 <button type="button" data-action="pair">Light/dark pair</button>
+{{/* A submit button, so it saves with or without JS. The one in the action row
+     at the foot of the form is a long post away from the text being written. */}}
+<button type="submit" class="editor-save">Save</button>
 <input type="file" class="editor-file" accept="image/*" hidden>
 <input type="file" class="editor-pair-file" accept="image/*" multiple hidden>
-<span class="editor-count"></span>
+{{/* The status sits beside Save, not out in the right corner: the eye is on
+     the button it just pressed, and a confirmation 700px away is one nobody
+     sees. The count keeps the corner. */}}
 <span class="editor-status" role="status" aria-live="polite"></span>
+<span class="editor-count"></span>
 </div>
 {{/* Shown by editor.js only when the browser is holding a draft that differs
      from what the server just rendered — a crash, a closed tab, or a session

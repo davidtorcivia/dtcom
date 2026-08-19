@@ -249,9 +249,9 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
   font-weight: 700;
 }
 
-/* Word count sits against the right edge and the transient messages — saved
-   at, uploading, unsaved — line up after it. The count is the stable one, so
-   it takes the free space and the status grows leftward from the corner. */
+/* The count takes the free space, which pins it to the right edge. The
+   transient messages — saved at, uploading, unsaved — sit before it, next to
+   the buttons that produce them. */
 .editor-count {
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -267,6 +267,24 @@ button[type="submit"]:not(.nav-link-btn):not([data-mode]):not(.admin-link-btn) {
 }
 
 .editor-status.is-error { color: var(--accent); }
+
+/* Saving used to leave nothing behind but muted grey text the eye slides off.
+   The confirmation is full contrast and arrives with a movement, which is what
+   actually catches the eye; it is deliberately not the yellow of the Save
+   button beside it, since a yellow block in a row of yellow blocks reads as
+   another control. It stays until the next keystroke, when setStatus replaces
+   it with "Unsaved changes", so the toolbar always says which of the two is
+   true. */
+.editor-status.is-saved {
+  color: var(--text);
+  font-weight: 700;
+  animation: editor-saved 0.35s ease-out;
+}
+
+@keyframes editor-saved {
+  from { opacity: 0; transform: translateY(-0.4rem); }
+  to { opacity: 1; transform: none; }
+}
 
 /* Offered when this browser is holding a draft the server did not render —
    the tab died, the machine went down, or the session expired mid-post. */

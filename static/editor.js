@@ -41,6 +41,9 @@
       }
       statusEl.textContent = text || '';
       statusEl.classList.toggle('is-error', !!isError);
+      // Every other status supersedes the save confirmation, including the
+      // "Unsaved changes" that the first keystroke after a save produces.
+      statusEl.classList.remove('is-saved');
     }
 
     // --- The draft as a whole ---------------------------------------------
@@ -272,7 +275,10 @@
       }
       saved = sent;
       clearStash();
-      setStatus('Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setStatus('\u2713 Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      if (statusEl) {
+        statusEl.classList.add('is-saved');
+      }
     }
 
     if (form) {
