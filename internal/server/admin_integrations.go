@@ -45,6 +45,16 @@ func (d *Deps) renderIntegrations(w http.ResponseWriter, errMsg string, newToken
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	mcpDesktop, err := mcpDesktopConfigJSON(base, token)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	mcpDesktopShown, err := mcpDesktopConfigJSON(base, maskToken(token))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	tokens, err := d.Store.ListAPITokens()
 	if err != nil {
@@ -53,15 +63,17 @@ func (d *Deps) renderIntegrations(w http.ResponseWriter, errMsg string, newToken
 	}
 
 	data := map[string]any{
-		"BaseURL":        base,
-		"Token":          token,
-		"TokenMask":      maskToken(token),
-		"TokenPrefix":    tokenPrefix(token),
-		"MCPConfig":      mcpConfig,
-		"MCPConfigShown": mcpConfigShown,
-		"Endpoints":      apiEndpoints,
-		"MCPTools":       mcpToolGroups,
-		"Tokens":         tokens,
+		"BaseURL":         base,
+		"Token":           token,
+		"TokenMask":       maskToken(token),
+		"TokenPrefix":     tokenPrefix(token),
+		"MCPConfig":       mcpConfig,
+		"MCPConfigShown":  mcpConfigShown,
+		"MCPDesktop":      mcpDesktop,
+		"MCPDesktopShown": mcpDesktopShown,
+		"Endpoints":       apiEndpoints,
+		"MCPTools":        mcpToolGroups,
+		"Tokens":          tokens,
 	}
 	if errMsg != "" {
 		data["Error"] = errMsg
@@ -93,10 +105,16 @@ func (d *Deps) adminTokenCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	mcpDesktop, err := mcpDesktopConfigJSON(d.Cfg.BaseURL, raw)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	d.renderIntegrations(w, "", map[string]string{
-		"Name":      t.Name,
-		"Value":     raw,
-		"MCPConfig": mcpConfig,
+		"Name":       t.Name,
+		"Value":      raw,
+		"MCPConfig":  mcpConfig,
+		"MCPDesktop": mcpDesktop,
 	})
 }
 
@@ -121,17 +139,65 @@ func (d *Deps) adminTokenRevoke(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/integrations", http.StatusSeeOther)
 }
 
-// mcpConfigJSON renders the client config block for a given token value.
-func mcpConfigJSON(base, token string) (string, error) {
+// The two client config shapes, as structs rather than maps so the fields come
+// out in reading order — encoding/json sorts map keys, which would put
+// "headers" above "type" and "url" in a block meant to be read by a person.
+type mcpHTTPServer struct {
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
+type mcpStdioServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+}
+
+func mcpServers(entry any) (string, error) {
 	b, err := json.MarshalIndent(map[string]any{
-		"mcpServers": map[string]any{
-			"dtcom": map[string]any{
-				"url":     base + "/mcp",
-				"headers": map[string]string{"Authorization": "Bearer " + token},
-			},
-		},
+		"mcpServers": map[string]any{"dtcom": entry},
 	}, "", "  ")
 	return string(b), err
+}
+
+// mcpConfigJSON renders the config for a client that speaks HTTP to an MCP
+// server directly: Claude Code, Cursor, VS Code.
+//
+// "type" is not decoration. A client reads an entry with a url and no type as a
+// stdio server and looks for a command that isn't there — Claude Code skips the
+// server and says so, and that is the "wrong format" this block used to produce.
+func mcpConfigJSON(base, token string) (string, error) {
+	return mcpServers(mcpHTTPServer{
+		Type:    "http",
+		URL:     base + "/mcp",
+		Headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+}
+
+// mcpDesktopConfigJSON renders the config for Claude Desktop, which is a
+// different shape rather than a variation on the one above.
+//
+// claude_desktop_config.json launches local stdio servers and has no url key at
+// all; remote servers are added through Settings → Connectors, and that flow
+// expects the server to run OAuth, which this one does not — it takes a bearer
+// token. mcp-remote bridges the gap: a stdio server that forwards to the URL and
+// attaches the header.
+//
+// The header value is held in env rather than written into args, because Claude
+// Desktop on Windows (and Cursor) do not escape spaces inside args when they
+// invoke npx, which mangles "Authorization: Bearer …" on the way through. Split
+// this way the only space lives in an environment variable, where it survives;
+// mcp-remote expands ${VAR} in a header value itself.
+func mcpDesktopConfigJSON(base, token string) (string, error) {
+	return mcpServers(mcpStdioServer{
+		Command: "npx",
+		Args: []string{
+			"-y", "mcp-remote", base + "/mcp",
+			"--header", "Authorization:${DTCOM_TOKEN}",
+		},
+		Env: map[string]string{"DTCOM_TOKEN": "Bearer " + token},
+	})
 }
 
 // tokenPrefix returns the leading characters used to identify a token in the
@@ -186,6 +252,7 @@ type mcpToolGroup struct {
 
 var mcpToolGroups = []mcpToolGroup{
 	{"Articles", []string{"list_articles", "get_article", "create_article", "update_article", "delete_article", "search_articles"}},
+	{"Images", []string{"list_images", "add_image"}},
 	{"Links", []string{"list_links", "add_link", "remove_link"}},
 	{"Site", []string{"get_site", "update_bio", "update_nav", "update_social", "update_rss_feeds"}},
 	{"Ops", []string{"regenerate", "get_stats", "refresh_feeds"}},

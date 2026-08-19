@@ -98,6 +98,27 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 	if len(raw) == 0 {
 		return "", errNoImageField
 	}
+	url, err := d.storeImageBytes(raw)
+	if err != nil {
+		return "", err
+	}
+	if header != nil {
+		slog.Info("image uploaded", "url", url, "original", header.Filename, "bytes", len(raw))
+	}
+	return url, nil
+}
+
+// storeImageBytes normalizes and stores one image, returning the URL it is
+// served at. Shared by the multipart upload above and the MCP add_image tool,
+// which comes by its bytes over JSON instead — the processing, the
+// content-addressed name and the rendition pass are the same either way.
+func (d *Deps) storeImageBytes(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", errNoImageField
+	}
+	if len(raw) > maxImageUpload {
+		return "", errImageTooLarge
+	}
 
 	var (
 		data   []byte
@@ -135,10 +156,7 @@ func (d *Deps) storeUploadedImage(w http.ResponseWriter, r *http.Request) (strin
 			return "", err
 		}
 	}
-	if header != nil {
-		slog.Info("image uploaded", "name", name, "original", header.Filename,
-			"bytes", len(data), "width", width, "height", height)
-	}
+	slog.Info("image stored", "name", name, "bytes", len(data), "width", width, "height", height)
 	if !isSVG(raw) {
 		d.generateRenditions(name)
 	}

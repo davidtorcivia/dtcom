@@ -34,6 +34,7 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 			"trigger a rebuild, so they are live immediately.",
 	})
 	registerArticleTools(srv, d)
+	registerImageTools(srv, d)
 	registerLinkTools(srv, d)
 	registerSiteTools(srv, d)
 	registerOpsTools(srv, d)
@@ -358,7 +359,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_article",
 		Annotations: reads("Read an article"),
-		Description: "Get a single article by slug: frontmatter + markdown body.",
+		Description: "Get a single article by slug: frontmatter + markdown body." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, articleDetail, error) {
 		a, err := d.findArticleBySlug(args.Slug)
 		if err != nil {
@@ -376,7 +377,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "create_article",
 		Annotations: writes("Write a new article", false),
-		Description: "Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds.",
+		Description: "Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args createArticleArgs) (*mcp.CallToolResult, articleResult, error) {
 		slug, status, err := d.createArticle(articleInput{
 			Title:       args.Title,
@@ -396,7 +397,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "update_article",
 		Annotations: writes("Edit an article", true),
-		Description: "Update an existing article identified by slug. Any field may be omitted to keep the current value.",
+		Description: "Update an existing article identified by slug. Any field may be omitted to keep the current value." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateArticleArgs) (*mcp.CallToolResult, articleResult, error) {
 		a, err := d.findArticleBySlug(args.Slug)
 		if err != nil {

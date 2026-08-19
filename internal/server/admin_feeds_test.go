@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -237,6 +239,96 @@ func TestIntegrationsPage(t *testing.T) {
 	d.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
 		t.Errorf("unauthenticated = %d, want a redirect to login", rec.Code)
+	}
+}
+
+// The config blocks are copied straight into a client's config file, so their
+// shape is the whole product. This page shipped an entry with a url and no
+// type, which every client reads as a local command — Claude Code skips it and
+// Claude Desktop rejects the file outright, since its config has no url key at
+// all and only ever launches a local program.
+func TestMCPConfigShapes(t *testing.T) {
+	const base = "https://example.com"
+	const token = "sekrit-token"
+
+	var direct struct {
+		MCPServers map[string]struct {
+			Type    string            `json:"type"`
+			URL     string            `json:"url"`
+			Headers map[string]string `json:"headers"`
+			Command string            `json:"command"`
+		} `json:"mcpServers"`
+	}
+	raw, err := mcpConfigJSON(base, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &direct); err != nil {
+		t.Fatalf("config is not valid JSON: %v\n%s", err, raw)
+	}
+	got, ok := direct.MCPServers["dtcom"]
+	if !ok {
+		t.Fatalf("no dtcom entry:\n%s", raw)
+	}
+	// Without this the entry is read as stdio and the server never loads.
+	if got.Type != "http" {
+		t.Errorf(`type = %q, want "http"`, got.Type)
+	}
+	if got.URL != base+"/mcp" {
+		t.Errorf("url = %q", got.URL)
+	}
+	if got.Headers["Authorization"] != "Bearer "+token {
+		t.Errorf("Authorization = %q", got.Headers["Authorization"])
+	}
+	if got.Command != "" {
+		t.Errorf("a URL server must not carry a command, got %q", got.Command)
+	}
+
+	var desktop struct {
+		MCPServers map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+			URL     string            `json:"url"`
+		} `json:"mcpServers"`
+	}
+	raw, err = mcpDesktopConfigJSON(base, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(raw), &desktop); err != nil {
+		t.Fatalf("desktop config is not valid JSON: %v\n%s", err, raw)
+	}
+	dt, ok := desktop.MCPServers["dtcom"]
+	if !ok {
+		t.Fatalf("no dtcom entry:\n%s", raw)
+	}
+	// claude_desktop_config.json has no url key; a stdio entry is the only
+	// thing it will load.
+	if dt.URL != "" {
+		t.Errorf("desktop entry must not carry a url, got %q", dt.URL)
+	}
+	if dt.Command != "npx" {
+		t.Errorf("command = %q, want npx", dt.Command)
+	}
+	if !slices.Contains(dt.Args, base+"/mcp") {
+		t.Errorf("args do not name the endpoint: %v", dt.Args)
+	}
+	if dt.Env["DTCOM_TOKEN"] != "Bearer "+token {
+		t.Errorf("DTCOM_TOKEN = %q", dt.Env["DTCOM_TOKEN"])
+	}
+	// Every space must live in env: Claude Desktop on Windows does not escape
+	// spaces inside args when it launches npx, so a header written inline
+	// arrives mangled and the connection fails with no useful message.
+	for _, a := range dt.Args {
+		if strings.Contains(a, " ") {
+			t.Errorf("arg %q contains a space, which Windows will mangle", a)
+		}
+	}
+	// mcp-remote splits the header on the first colon and expands ${VAR} from
+	// the environment, so this exact spelling is what makes the two halves meet.
+	if !slices.Contains(dt.Args, "Authorization:${DTCOM_TOKEN}") {
+		t.Errorf("args do not carry the header reference: %v", dt.Args)
 	}
 }
 

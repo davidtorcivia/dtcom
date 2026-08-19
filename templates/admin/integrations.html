@@ -15,7 +15,8 @@ the value is shown.</p>
 <div class="token-row">
 <code class="token token-new">{{.Value}}</code>
 <button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.Value}}">Copy token</button>
-<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.MCPConfig}}">Copy MCP config</button>
+<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.MCPConfig}}">Copy MCP config (URL clients)</button>
+<button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.MCPDesktop}}">Copy MCP config (Claude Desktop)</button>
 </div>
 </div>
 {{end}}
@@ -64,14 +65,41 @@ and restarting.</p>
 
 <section class="admin-section">
 <h3 class="admin-h3">MCP client</h3>
-<p class="admin-hint">The <code>/mcp</code> endpoint speaks MCP over Streamable HTTP, at the
-<code>2026-07-28</code> revision of the spec; older clients are still answered on the same URL. Paste this into
-<code>claude_desktop_config.json</code> (or any MCP client's config). The transport is HTTP, so there is no
-<code>command</code> key.</p>
+<p class="admin-lede">The <code>/mcp</code> endpoint speaks MCP over Streamable HTTP, at the
+<code>2026-07-28</code> revision of the spec; older clients are still answered on the same URL. It authenticates
+with the bearer token above — no OAuth — which is what decides the shape of the config below. In both blocks
+the token is masked; <strong>Copy</strong> puts the real one on your clipboard.</p>
+
+<h4 class="admin-h4">Claude Code, Cursor, VS Code</h4>
+<p class="admin-hint">Anything that connects to an MCP URL itself. Goes in <code>.mcp.json</code> (or
+<code>~/.claude.json</code>). <code>"type"</code> is not optional: an entry carrying a <code>url</code> and no
+<code>type</code> is read as a local command that isn&rsquo;t there, and the server is skipped.</p>
 <div class="code-block-wrap">
 <button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="{{.MCPConfig}}">Copy</button>
 <pre class="code-block"><code>{{.MCPConfigShown}}</code></pre>
-<p class="admin-hint">The token is masked above; <strong>Copy</strong> puts the real one on your clipboard.</p>
+</div>
+<p class="admin-hint">Or let the CLI write it:</p>
+<div class="code-block-wrap">
+<button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="claude mcp add --transport http dtcom {{.BaseURL}}/mcp --header &#34;Authorization: Bearer {{.Token}}&#34;">Copy</button>
+<pre class="code-block"><code>claude mcp add --transport http dtcom {{.BaseURL}}/mcp \
+  --header "Authorization: Bearer {{.TokenMask}}"</code></pre>
+</div>
+
+<h4 class="admin-h4">Claude Desktop</h4>
+<p class="admin-hint"><code>claude_desktop_config.json</code> starts <em>local</em> programs and has no
+<code>url</code> key at all — paste the block above into it and it is rejected as the wrong shape. Remote
+servers normally go in under <strong>Settings &rarr; Connectors &rarr; Add custom connector</strong>, but that
+asks the server to run an OAuth flow, and this one takes a bearer token instead. So run
+<a href="https://www.npmjs.com/package/mcp-remote" target="_blank" rel="noopener">mcp-remote</a> as the local
+program and let it carry the header for you. Needs Node.</p>
+<div class="code-block-wrap">
+<button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="{{.MCPDesktop}}">Copy</button>
+<pre class="code-block"><code>{{.MCPDesktopShown}}</code></pre>
+<p class="admin-hint">The header sits in <code>env</code> rather than inline in <code>args</code> on purpose:
+Claude Desktop on Windows does not escape spaces inside <code>args</code> when it launches
+<code>npx</code>, so <code>Bearer&nbsp;&hellip;</code> arrives mangled. Split this way the only space is in an
+environment variable, and <code>mcp-remote</code> expands <code>${DTCOM_TOKEN}</code> itself. Restart Claude
+Desktop fully after editing the file.</p>
 </div>
 <h4 class="admin-h4">Tools exposed</h4>
 <div class="tool-grid">
