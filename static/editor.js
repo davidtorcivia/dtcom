@@ -299,12 +299,22 @@
     // The textarea was a fixed 400px box scrolling inside a scrolling page, so
     // a long post meant working through a letterbox with two scrollbars.
     // Growing it to its content leaves one scrollbar: the page's.
+    //
+    // Collapsing to auto to measure is what makes the reflow honest, and it is
+    // also what loses the reader's place: for the length of that forced layout
+    // the page is short enough that the browser clamps the scroll offset, and
+    // putting the height back does not put the offset back. So the offset is
+    // carried across by hand.
     function autogrow() {
       if (!ta.style) {
         return;
       }
+      var y = window.scrollY;
       ta.style.height = 'auto';
       ta.style.height = ta.scrollHeight + 'px';
+      if (window.scrollY !== y) {
+        window.scrollTo(0, y);
+      }
     }
 
     function onEdit() {
