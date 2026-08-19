@@ -71,9 +71,11 @@ with the bearer token above — no OAuth — which is what decides the shape of 
 the token is masked; <strong>Copy</strong> puts the real one on your clipboard.</p>
 
 <h4 class="admin-h4">Claude Code, Cursor, VS Code</h4>
-<p class="admin-hint">Anything that connects to an MCP URL itself. Goes in <code>.mcp.json</code> (or
-<code>~/.claude.json</code>). <code>"type"</code> is not optional: an entry carrying a <code>url</code> and no
-<code>type</code> is read as a local command that isn&rsquo;t there, and the server is skipped.</p>
+<p class="admin-hint">Anything that connects to an MCP URL itself. <strong>Not Claude Desktop</strong>: that one
+cannot read a <code>url</code> entry and reports it as not a valid server configuration, so use the block below
+instead. <code>"type"</code> is not optional either &mdash; an entry carrying a <code>url</code> and no
+<code>type</code> is read as a local command that isn&rsquo;t there, and is skipped the same way.</p>
+<span class="code-filename">.mcp.json</span>
 <div class="code-block-wrap">
 <button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="{{.MCPConfig}}">Copy</button>
 <pre class="code-block"><code>{{.MCPConfigShown}}</code></pre>
@@ -87,11 +89,13 @@ the token is masked; <strong>Copy</strong> puts the real one on your clipboard.<
 
 <h4 class="admin-h4">Claude Desktop</h4>
 <p class="admin-hint"><code>claude_desktop_config.json</code> starts <em>local</em> programs and has no
-<code>url</code> key at all — paste the block above into it and it is rejected as the wrong shape. Remote
+<code>url</code> key at all, so pasting the block above into it gets "not a valid MCP server configuration" and the entry is skipped. Remote
 servers normally go in under <strong>Settings &rarr; Connectors &rarr; Add custom connector</strong>, but that
 asks the server to run an OAuth flow, and this one takes a bearer token instead. So run
 <a href="https://www.npmjs.com/package/mcp-remote" target="_blank" rel="noopener">mcp-remote</a> as the local
-program and let it carry the header for you. Needs Node.</p>
+program and let it carry the header for you. Needs Node. Paste this entry <em>inside</em> the existing
+<code>mcpServers</code> object rather than replacing the file.</p>
+<span class="code-filename">claude_desktop_config.json</span>
 <div class="code-block-wrap">
 <button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="{{.MCPDesktop}}">Copy</button>
 <pre class="code-block"><code>{{.MCPDesktopShown}}</code></pre>

@@ -934,6 +934,23 @@ input[type="file"]:focus-visible::file-selector-button {
 
 .code-block-wrap { position: relative; }
 
+/* The filename a block belongs in, sitting on its top edge. Two of these
+   configs are valid JSON that a client will happily parse and then reject,
+   because the shape a file accepts is decided by the file, not by the JSON:
+   claude_desktop_config.json only starts local programs. Naming the target on
+   the block itself is what stops the wrong one being copied. */
+.code-filename {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #111;
+  background: var(--accent-yellow);
+  padding: 0.2rem 0.6rem;
+  font-weight: 700;
+}
+
+.code-filename + .code-block-wrap .code-block { border-top: none !important; }
+
 .code-block {
   background: var(--surface-hover);
   border: 1px solid var(--text-muted) !important;
