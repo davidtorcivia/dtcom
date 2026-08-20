@@ -33,7 +33,7 @@
      days nobody visited — so the width of a gap means what it looks like it
      means. The tooltip is progressive: data-* carries the numbers, admin.js
      draws the panel, and the title attribute keeps it working without it. */}}
-<section class="panel">
+<section data-panel="chart" class="panel">
 <div class="panel-head">
 <h3 class="panel-title">Views</h3>
 {{template "range-picker" (index .Pickers "chart")}}
@@ -63,7 +63,7 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 </section>
 
 <div class="stats-columns">
-<section class="panel stats-column">
+<section data-panel="top" class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Most read</h3>
 {{template "range-picker" (index .Pickers "top")}}
@@ -80,7 +80,7 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 </ul>{{else}}<p class="admin-empty">Nothing read in this range.</p>{{end}}
 </section>
 
-<section class="panel stats-column">
+<section data-panel="ref" class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Where from</h3>
 {{template "range-picker" (index .Pickers "ref")}}
@@ -96,7 +96,7 @@ busiest {{.ChartGrain}} <strong>{{.ChartPeak}}</strong> on {{.ChartPeakAt}}{{end
 coming from an app that strips the referrer arrive without one.</p>{{end}}
 </section>
 
-<section class="panel stats-column">
+<section data-panel="place" class="panel stats-column">
 <div class="panel-head">
 <h3 class="panel-title">Places</h3>
 {{template "range-picker" (index .Pickers "place")}}

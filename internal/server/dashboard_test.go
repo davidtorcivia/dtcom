@@ -33,7 +33,7 @@ func dashboardFor(t *testing.T, d *testDeps, query string) string {
 // the other three along as that each renders.
 func TestDashboardRangesRender(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
-	today := time.Now().UTC().Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
 	if err := d.deps.Store.RecordView(store.View{Path: "/posts/hello", Day: today, IPHash: "hash-a"}); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDashboardUnknownRangeFallsBack(t *testing.T) {
 // row, and a month with two busy days used to render as two bars side by side.
 func TestDashboardChartFillsQuietDays(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
-	today := time.Now().UTC()
+	today := time.Now()
 	// Two views a week apart, nothing in between.
 	for _, day := range []string{
 		today.AddDate(0, 0, -7).Format("2006-01-02"),
@@ -107,7 +107,7 @@ func TestDashboardChartFillsQuietDays(t *testing.T) {
 // not appear in it.
 func TestDashboardTopRangeScopesCounts(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
-	today := time.Now().UTC()
+	today := time.Now()
 	old := today.AddDate(0, 0, -60).Format("2006-01-02")
 	if err := d.deps.Store.RecordView(store.View{Path: "/posts/ancient", Day: old, IPHash: "hash-a"}); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestDashboardTopRangeScopesCounts(t *testing.T) {
 // or a year of history would be a bar per pixel.
 func TestDashboardMonthlyGrain(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
-	today := time.Now().UTC()
+	today := time.Now()
 	if err := d.deps.Store.RecordView(store.View{Path: "/posts/hello", Day: today.AddDate(0, -6, 0).Format("2006-01-02"), IPHash: "h"}); err != nil {
 		t.Fatal(err)
 	}

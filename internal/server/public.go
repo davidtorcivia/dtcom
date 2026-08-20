@@ -201,12 +201,12 @@ func (d *Deps) handleTrack(w http.ResponseWriter, r *http.Request) {
 	}
 	ipHash := d.hashIP(d.clientIP(r))
 	if body.Dwell > 0 {
-		_ = d.Store.AddDwell(body.Path, todayUTC(), ipHash, min(body.Dwell, maxDwellSeconds))
+		_ = d.Store.AddDwell(body.Path, today(), ipHash, min(body.Dwell, maxDwellSeconds))
 		return
 	}
 	place := d.clientPlace(r)
 	place.Path = body.Path
-	place.Day = todayUTC()
+	place.Day = today()
 	place.IPHash = ipHash
 	place.Referrer = d.referrerHost(body.Ref)
 	_ = d.Store.RecordView(place)

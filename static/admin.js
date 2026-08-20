@@ -151,17 +151,71 @@
 
   // --- Range pickers ------------------------------------------------------
   //
-  // The range <select>s submit their form on change, which is what a dropdown
-  // that changes the view is expected to do. The form still has a submit
-  // button for the no-JS case; marking the form live hides it (CSS), so the
-  // button never sits there uselessly next to a select that already applied.
-  var pickers = document.querySelectorAll('.range-picker [data-autosubmit]');
-  for (var p = 0; p < pickers.length; p++) {
-    pickers[p].form.classList.add('is-live');
-    pickers[p].addEventListener('change', function (e) {
-      e.target.form.submit();
-    });
+  // The range <select>s change what one panel shows, so only that panel is
+  // replaced. The dashboard already renders every panel from the query string,
+  // so this fetches the same page it would have navigated to and lifts the one
+  // section out of it — no fragment endpoint, no template split, and the no-JS
+  // path (a GET form with a Show button) still works unchanged.
+  //
+  // The form's hidden fields carry the other panels' ranges for that no-JS
+  // submit; the URL here is built from the address bar instead, which stays
+  // current after a swap while those hidden fields go stale.
+
+  function armPickers(root) {
+    var selects = root.querySelectorAll('.range-picker [data-autosubmit]');
+    for (var i = 0; i < selects.length; i++) {
+      // Marking the form live hides the submit button (CSS), so it never sits
+      // there uselessly next to a select that already applied.
+      selects[i].form.classList.add('is-live');
+    }
   }
+
+  // Delegated, so a select that arrives in a swapped-in panel is already wired.
+  document.addEventListener('change', function (e) {
+    var select = e.target;
+    if (!select.matches || !select.matches('.range-picker [data-autosubmit]')) {
+      return;
+    }
+    var form = select.form;
+    var panel = select.closest('[data-panel]');
+    if (!panel || !window.fetch || !window.DOMParser) {
+      form.submit();
+      return;
+    }
+
+    var params = new URLSearchParams(window.location.search);
+    params.set(select.name, select.value);
+    var url = form.getAttribute('action') + '?' + params.toString();
+
+    panel.classList.add('is-loading');
+    fetch(url, { credentials: 'same-origin' })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error(res.status);
+        }
+        return res.text();
+      })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var fresh = doc.querySelector('[data-panel="' + panel.dataset.panel + '"]');
+        if (!fresh) {
+          // No panel in the response means it was not the dashboard — a
+          // login page after the session expired, most likely. Navigate so
+          // that page is actually shown.
+          throw new Error('no panel');
+        }
+        // The tooltip pins itself to a bar that is about to be removed.
+        hideTip();
+        panel.replaceWith(fresh);
+        armPickers(fresh);
+        armChart(fresh);
+        history.replaceState(null, '', url);
+      })
+      .catch(function () {
+        panel.classList.remove('is-loading');
+        window.location.href = url;
+      });
+  });
 
   // --- Chart tooltip ------------------------------------------------------
   //
@@ -246,9 +300,11 @@
   // Keyboard and touch: focus or tap a column to read it. The columns are
   // given tabindex here rather than in the template so that a browser without
   // scripting does not offer a tab stop that does nothing.
-  var charts = document.querySelectorAll('[data-chart] .chart-col');
-  for (var i = 0; i < charts.length; i++) {
-    charts[i].tabIndex = 0;
+  function armChart(root) {
+    var cols = root.querySelectorAll('[data-chart] .chart-col');
+    for (var i = 0; i < cols.length; i++) {
+      cols[i].tabIndex = 0;
+    }
   }
   document.addEventListener('focusin', function (e) {
     var col = e.target.closest ? e.target.closest('.chart-col') : null;
@@ -258,4 +314,6 @@
       hideTip();
     }
   });
+  armPickers(document);
+  armChart(document);
 })();

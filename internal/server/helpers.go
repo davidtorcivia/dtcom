@@ -191,8 +191,10 @@ func (d *Deps) hashIP(addr string) string {
 	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
-// todayUTC returns the current UTC day as YYYY-MM-DD, the granularity at which
-// view dedup is bucketed.
-func todayUTC() string {
-	return time.Now().UTC().Format("2006-01-02")
+// today returns the current day as YYYY-MM-DD, the granularity at which view
+// dedup is bucketed. Local time, so a day boundary falls at the site owner's
+// midnight rather than at 8pm — set TZ to say which zone that is (see
+// docker-compose.yml); Go falls back to UTC when it is unset.
+func today() string {
+	return time.Now().Format("2006-01-02")
 }

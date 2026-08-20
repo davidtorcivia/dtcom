@@ -69,7 +69,7 @@ func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 			return t.Format("2 January 2006")
 		},
 		"formatDateUnix": func(u int64) string {
-			return time.Unix(u, 0).UTC().Format("2006-01-02")
+			return time.Unix(u, 0).Format("2006-01-02")
 		},
 		// rfc3339 renders a machine-readable date for <time datetime>.
 		"rfc3339":    func(t time.Time) string { return t.Format(time.RFC3339) },

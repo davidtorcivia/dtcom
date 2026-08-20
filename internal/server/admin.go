@@ -357,7 +357,7 @@ func (d *Deps) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		recent = recent[:5]
 	}
 
-	today := time.Now().UTC()
+	today := time.Now()
 	todayStr := today.Format("2006-01-02")
 	firstDay, err := d.Store.FirstViewDay()
 	if err != nil {

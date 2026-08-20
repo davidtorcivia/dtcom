@@ -27,6 +27,9 @@ services:
       DTCOM_BACKUP_KEEP: ${DTCOM_BACKUP_KEEP:-30}
       DTCOM_BACKUP_DIR: ${DTCOM_BACKUP_DIR:-}
       DTCOM_LISTEN_ADDR: ":8080"
+      # The zone the dashboard's days are cut on: a view at 9pm belongs to that
+      # evening, not to tomorrow. Unset falls back to UTC.
+      TZ: ${TZ:-America/New_York}
       DTCOM_LOG_LEVEL: ${DTCOM_LOG_LEVEL:-info}
       # Behind a proxy the real client address arrives in a header. Leave this
       # off if the port is published directly — otherwise any client can forge

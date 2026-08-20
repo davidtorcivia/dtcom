@@ -103,7 +103,7 @@ func adminTemplateFuncs(fp *assets.Fingerprinter) template.FuncMap {
 		"asset":          fp.URL,
 		"join":           func(ss []string, sep string) string { return strings.Join(ss, sep) },
 		"formatDate":     func(t time.Time) string { return t.Format("2006-01-02") },
-		"formatDateUnix": func(u int64) string { return time.Unix(u, 0).UTC().Format("2006-01-02") },
+		"formatDateUnix": func(u int64) string { return time.Unix(u, 0).Format("2006-01-02") },
 		"add":            func(a, b int) int { return a + b },
 		// lower lets a range label ("30 days") sit mid-sentence without a
 		// second copy of the string in lower case.
