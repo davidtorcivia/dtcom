@@ -999,10 +999,93 @@
     input.focus();
   }
 
+  function initContactSheet() {
+    var dialog = document.getElementById('contact-sheet');
+    if (!dialog || typeof dialog.showModal !== 'function') {
+      return;
+    }
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) {
+        return;
+      }
+      var opener = t.closest('[data-contact-sheet]');
+      if (!opener) {
+        return;
+      }
+      e.preventDefault();
+      dialog.showModal();
+      var closeBtn = dialog.querySelector('.contact-sheet-close');
+      if (closeBtn) {
+        closeBtn.focus();
+      }
+    });
+
+    dialog.addEventListener('click', function (e) {
+      if (e.target === dialog) {
+        dialog.close();
+        return;
+      }
+      var copyBtn = e.target.closest('[data-copy], [data-copy-el]');
+      if (!copyBtn) {
+        return;
+      }
+      var text = copyBtn.getAttribute('data-copy');
+      if (!text) {
+        var sel = copyBtn.getAttribute('data-copy-el');
+        var el = sel ? dialog.querySelector(sel) : null;
+        text = el ? el.textContent : '';
+      }
+      copyText(text, copyBtn);
+    });
+  }
+
+  function copyText(text, btn) {
+    if (!text) {
+      return;
+    }
+    var done = function () {
+      if (!btn) {
+        return;
+      }
+      var prev = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', prev);
+      btn.textContent = 'Copied';
+      window.setTimeout(function () {
+        btn.textContent = prev;
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        copyFallback(text, done);
+      });
+      return;
+    }
+    copyFallback(text, done);
+  }
+
+  function copyFallback(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      done();
+    } finally {
+      document.body.removeChild(ta);
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     initTheme();
     initBeacon();
     initSearch();
     initLightbox();
+    initContactSheet();
   });
 })();

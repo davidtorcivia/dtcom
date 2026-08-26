@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"davidtorcivia.com/dtcom/internal/pgp"
 	"davidtorcivia.com/dtcom/internal/store"
 )
 
@@ -79,6 +80,8 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("GET /feed.xml", d.servePublicFile("feed.xml"))
 	mux.HandleFunc("GET /sitemap.xml", d.servePublicFile("sitemap.xml"))
 	mux.HandleFunc("GET /robots.txt", d.servePublicFile("robots.txt"))
+	mux.HandleFunc("GET /pgp.asc", d.servePGPAsc)
+	mux.HandleFunc("GET /.well-known/openpgpkey/{path...}", d.serveWKD)
 	mux.HandleFunc("GET /favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", staticCacheControl)
 		http.ServeFile(w, r, filepath.Join(d.Cfg.StaticDir, "favicon.svg"))
@@ -122,6 +125,67 @@ func (d *Deps) handleNotFound(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write(body)
+}
+
+func (d *Deps) servePGPAsc(w http.ResponseWriter, r *http.Request) {
+	path := filepath.Join(d.Cfg.PublicDir, "pgp.asc")
+	if !fileExists(path) {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pgp-keys")
+	w.Header().Set("Cache-Control", pageCacheControl)
+	http.ServeFile(w, r, path)
+}
+
+func (d *Deps) serveWKD(w http.ResponseWriter, r *http.Request) {
+	rel := r.PathValue("path")
+	if !validWKDPath(rel) {
+		http.NotFound(w, r)
+		return
+	}
+	root := filepath.Join(d.Cfg.PublicDir, ".well-known", "openpgpkey")
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	if !fileExists(full) || !confined(full, root) {
+		http.NotFound(w, r)
+		return
+	}
+	if strings.HasSuffix(rel, "policy") {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	w.Header().Set("Cache-Control", pageCacheControl)
+	http.ServeFile(w, r, full)
+}
+
+func validWKDPath(rel string) bool {
+	rel = strings.Trim(rel, "/")
+	if rel == "" || strings.Contains(rel, "..") {
+		return false
+	}
+	parts := strings.Split(rel, "/")
+	switch len(parts) {
+	case 1:
+		return parts[0] == "policy"
+	case 2:
+		if parts[0] == "hu" {
+			return pgp.IsZBase32(parts[1])
+		}
+		return pgp.ValidWKDDomain(parts[0]) && parts[1] == "policy"
+	case 3:
+		return pgp.ValidWKDDomain(parts[0]) && parts[1] == "hu" && pgp.IsZBase32(parts[2])
+	default:
+		return false
+	}
+}
+
+func confined(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func fileExists(path string) bool {

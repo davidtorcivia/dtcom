@@ -19,6 +19,7 @@ import (
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/config"
 	"davidtorcivia.com/dtcom/internal/feeds"
+	"davidtorcivia.com/dtcom/internal/pgp"
 	"davidtorcivia.com/dtcom/internal/server"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
@@ -99,6 +100,7 @@ func run() error {
 		Site:         siteFn,
 		Store:        st,
 		TemplatesDir: cfg.TemplatesDir,
+		PGP:          pgp.New(filepath.Join(cfg.DataDir, "pgp.json")),
 	})
 	if err != nil {
 		return err

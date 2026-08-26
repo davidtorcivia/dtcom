@@ -15,6 +15,7 @@ import (
 	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/feeds"
 	"davidtorcivia.com/dtcom/internal/markdown"
+	"davidtorcivia.com/dtcom/internal/pgp"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
 )
@@ -33,6 +34,11 @@ type EngineConfig struct {
 	// its own over StaticDir. Pass a shared one so the admin templates, which
 	// render outside this package, see the same hashes after a rebuild.
 	Assets *assets.Fingerprinter
+
+	// PGP looks up the contact address's public key during rebuild. Optional:
+	// tests that must not talk to a keyserver leave it nil, and the site then
+	// has no contact sheet or WKD files.
+	PGP *pgp.Cache
 }
 
 type Engine struct {
@@ -41,6 +47,7 @@ type Engine struct {
 	tmpls  templateStore
 	assets *assets.Fingerprinter
 	images *ImageIndex
+	pgpOut *pgpMaterial
 
 	// buildStart is when the running (or most recent) rebuild began reading
 	// content, in Unix nanoseconds. See BuildStartedAt.
@@ -116,6 +123,8 @@ func (e *Engine) Rebuild() error {
 		return fmt.Errorf("load templates: %w", err)
 	}
 
+	e.resolvePGP()
+
 	arts, err := LoadArticles(e.cfg.PostsDir)
 	if err != nil {
 		return fmt.Errorf("load articles: %w", err)
@@ -146,6 +155,7 @@ func (e *Engine) Rebuild() error {
 		{"feed", func(w *pathSet) error { return e.renderFeed(published, w) }},
 		{"sitemap", func(w *pathSet) error { return e.renderSitemap(published, w) }},
 		{"robots", e.renderRobots},
+		{"pgp", e.renderPGP},
 	}
 	for _, p := range pages {
 		if err := p.fn(written); err != nil {
@@ -295,8 +305,7 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 		return err
 	}
 	dir := filepath.Join(e.cfg.PublicDir, "posts", a.Slug)
-	data := map[string]any{
-		"Site":    site,
+	data := e.pageVars(site, map[string]any{
 		"Article": a,
 		"HTML":    htmlBody,
 		"URL":     baseURL(site) + "/posts/" + a.Slug,
@@ -304,7 +313,7 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 		// KaTeX is ~600 KB of script and fonts. Most posts have no math, so
 		// the page only pulls it in when there is something to typeset.
 		"HasMath": markdown.HasMath(htmlBody),
-	}
+	})
 	if err := e.renderPage("article", filepath.Join(dir, "index.html"), data, written); err != nil {
 		return err
 	}
@@ -324,11 +333,10 @@ func (e *Engine) renderHome(published []Article, written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("home", filepath.Join(e.cfg.PublicDir, "index.html"), map[string]any{
-		"Site":     site,
+	return e.renderPage("home", filepath.Join(e.cfg.PublicDir, "index.html"), e.pageVars(site, map[string]any{
 		"Articles": published,
 		"OGImage":  ogImage,
-	}, written)
+	}), written)
 }
 
 // renderLinks renders the merged links index (manual + RSS-imported).
@@ -346,11 +354,10 @@ func (e *Engine) renderLinks(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("links", filepath.Join(e.cfg.PublicDir, "links", "index.html"), map[string]any{
-		"Site":    site,
+	return e.renderPage("links", filepath.Join(e.cfg.PublicDir, "links", "index.html"), e.pageVars(site, map[string]any{
 		"Links":   links,
 		"OGImage": ogImage,
-	}, written)
+	}), written)
 }
 
 // renderSearch renders the client-side search page. It is a static shell; the
@@ -361,10 +368,9 @@ func (e *Engine) renderSearch(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("search", filepath.Join(e.cfg.PublicDir, "search", "index.html"), map[string]any{
-		"Site":    site,
+	return e.renderPage("search", filepath.Join(e.cfg.PublicDir, "search", "index.html"), e.pageVars(site, map[string]any{
 		"OGImage": ogImage,
-	}, written)
+	}), written)
 }
 
 // render404 renders the not-found page the server returns for unmatched routes.
@@ -374,10 +380,9 @@ func (e *Engine) render404(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("notfound", filepath.Join(e.cfg.PublicDir, "404.html"), map[string]any{
-		"Site":    site,
+	return e.renderPage("notfound", filepath.Join(e.cfg.PublicDir, "404.html"), e.pageVars(site, map[string]any{
 		"OGImage": ogImage,
-	}, written)
+	}), written)
 }
 
 // renderFeed renders the outbound RSS feed (feed.xml) of published articles.

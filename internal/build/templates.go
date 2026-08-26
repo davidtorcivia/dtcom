@@ -81,12 +81,10 @@ func helperFuncs(fp *assets.Fingerprinter) template.FuncMap {
 			if site == nil {
 				return ""
 			}
-			for _, s := range site.Social {
-				if s.Icon == "email" || strings.HasPrefix(strings.ToLower(s.Href), "mailto:") {
-					return s.Href
-				}
-			}
-			return ""
+			return site.ContactHref()
+		},
+		"isMailto": func(href string) bool {
+			return strings.HasPrefix(strings.ToLower(strings.TrimSpace(href)), "mailto:")
 		},
 		// absURL turns a site-relative path into an absolute one for og: tags
 		// and canonical links, which require it.

@@ -7,6 +7,33 @@ import (
 	"testing"
 )
 
+func TestContactEmail(t *testing.T) {
+	cases := []struct {
+		social []SocialLink
+		href   string
+		email  string
+	}{
+		{nil, "", ""},
+		{[]SocialLink{{Label: "X", Href: "https://x.com/x", Icon: "x"}}, "", ""},
+		{[]SocialLink{{Label: "Contact", Href: "mailto:David@Example.COM", Icon: "email"}}, "mailto:David@Example.COM", "david@example.com"},
+		{[]SocialLink{{Label: "Mail", Href: "mailto:a@b.c?subject=hi", Icon: "email"}}, "mailto:a@b.c?subject=hi", "a@b.c"},
+		{[]SocialLink{{Label: "Mail", Href: "MAILTO:a@b.c", Icon: "github"}}, "MAILTO:a@b.c", "a@b.c"},
+		{[]SocialLink{{Label: "Contact", Href: "/contact", Icon: "email"}}, "/contact", ""},
+	}
+	for _, tc := range cases {
+		c := &Config{Social: tc.social}
+		if got := c.ContactHref(); got != tc.href {
+			t.Errorf("ContactHref(%+v) = %q, want %q", tc.social, got, tc.href)
+		}
+		if got := c.ContactEmail(); got != tc.email {
+			t.Errorf("ContactEmail(%+v) = %q, want %q", tc.social, got, tc.email)
+		}
+	}
+	if (*Config)(nil).ContactEmail() != "" {
+		t.Fatal("nil config should have no contact email")
+	}
+}
+
 func TestLoadAndRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "site.yml")
