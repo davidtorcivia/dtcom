@@ -43,6 +43,7 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/site", d.requireAuth(d.adminSiteSave))
 	mux.HandleFunc("POST /admin/site/favicon", d.requireAuth(d.adminFaviconUpload))
 	mux.HandleFunc("POST /admin/site/favicon/reset", d.requireAuth(d.adminFaviconReset))
+	mux.HandleFunc("POST /admin/site/pgp/refresh", d.requireAuth(d.adminPGPRefresh))
 	mux.HandleFunc("POST /admin/images", d.requireAuth(d.adminImageUpload))
 	mux.HandleFunc("GET /admin/integrations", d.requireAuth(d.adminIntegrations))
 	mux.HandleFunc("POST /admin/tokens", d.requireAuth(d.adminTokenCreate))
@@ -1055,7 +1056,15 @@ func (d *Deps) renderSiteEditWith(w http.ResponseWriter, site *siteconfig.Config
 		// Offered as a dropdown in the social-link form: an unknown icon
 		// renders as nothing, so free text would let a typo produce an
 		// invisible link.
-		"Icons": build.SocialIconNames(),
+		"Icons":        build.SocialIconNames(),
+		"PGPEnabled":   d.Engine != nil && d.Engine.PGPEnabled(),
+		"ContactEmail": "",
+	}
+	if site != nil {
+		data["ContactEmail"] = site.ContactEmail()
+	}
+	if d.Engine != nil {
+		data["PGP"] = d.Engine.PGPRecord()
 	}
 	if errMsg != "" {
 		data["Error"] = errMsg
@@ -1113,6 +1122,18 @@ func (d *Deps) adminSiteSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := d.Engine.Rebuild(); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	http.Redirect(w, r, "/admin/site", http.StatusSeeOther)
+}
+
+func (d *Deps) adminPGPRefresh(w http.ResponseWriter, r *http.Request) {
+	if d.Engine == nil {
+		writeError(w, http.StatusServiceUnavailable, nil)
+		return
+	}
+	if err := d.Engine.RefreshPGP(); err != nil {
+		d.renderSiteEdit(w, err.Error())
 		return
 	}
 	http.Redirect(w, r, "/admin/site", http.StatusSeeOther)

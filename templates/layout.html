@@ -21,6 +21,7 @@
   {{if .Site.Favicon}}<link rel="icon" href="{{.Site.Favicon}}">
   {{else}}<link rel="icon" href="{{asset "/static/favicon.svg"}}" type="image/svg+xml">{{end}}
   <link rel="alternate" type="application/rss+xml" title="{{.Site.Title}}" href="/feed.xml">
+  {{with .PGP}}<link rel="pgpkey" type="application/pgp-keys" href="/pgp.asc">{{end}}
   <script src="{{asset "/static/app.js"}}" defer></script>
   {{/* The optional third-party tracker from site.yml. Built in Go rather than
        here because the data-* attribute names are configuration, and a template
@@ -44,11 +45,12 @@
 <footer class="site-footer">
   <div class="footer-left">{{range $i, $f := .Site.FooterLeft}}{{if $i}} <span class="dot-sep">·</span> {{end}}<span>{{$f}}</span>{{end}}</div>
   <nav class="footer-links" aria-label="Site">
-    {{with contactHref .Site}}<a href="{{.}}">Contact</a>{{end}}
+    {{with contactHref .Site}}<a href="{{.}}"{{if $.PGP}} data-contact-sheet{{end}}>Contact</a>{{end}}
     <a href="/feed.xml">RSS</a>
     <a href="#top">TOP ↑</a>
   </nav>
 </footer>
+{{template "contact-sheet" .}}
 {{end}}
 
 {{define "bio-section"}}
@@ -57,7 +59,28 @@
   {{if .Site.Social}}<div class="bio-social-links">
     {{range $i, $s := .Site.Social}}{{if $i}}
     <span class="dot-sep">·</span>
-    {{end}}<a href="{{$s.Href}}" target="_blank" rel="noopener noreferrer" title="{{$s.Label}}" aria-label="{{$s.Label}}">{{socialIcon $s.Icon}}</a>{{end}}
+    {{end}}<a href="{{$s.Href}}"{{if not (or (eq $s.Icon "email") (isMailto $s.Href))}} target="_blank" rel="noopener noreferrer"{{end}}{{if and $.PGP (eq $s.Href (contactHref $.Site))}} data-contact-sheet{{end}} title="{{$s.Label}}" aria-label="{{$s.Label}}">{{socialIcon $s.Icon}}</a>{{end}}
   </div>{{end}}
 </section>
+{{end}}
+
+{{define "contact-sheet"}}
+{{with .PGP}}<dialog class="contact-sheet" id="contact-sheet" aria-labelledby="contact-sheet-title">
+  <form method="dialog"><button type="submit" class="contact-sheet-close" aria-label="Close">Close</button></form>
+  <h2 id="contact-sheet-title">Contact</h2>
+  <div class="contact-sheet-row">
+    <a class="contact-sheet-email" href="{{.Mailto}}">{{.Email}}</a>
+    <button type="button" class="contact-sheet-copy" data-copy="{{.Email}}">Copy</button>
+  </div>
+  {{if .Fingerprint}}<div class="contact-sheet-row">
+    <p class="contact-sheet-fp"><span>PGP</span> {{.Fingerprint}}</p>
+    <button type="button" class="contact-sheet-copy" data-copy="{{.FingerprintCompact}}">Copy</button>
+  </div>{{end}}
+  <pre class="contact-sheet-key" id="contact-sheet-key">{{.Armored}}</pre>
+  <div class="contact-sheet-actions">
+    <button type="button" class="contact-sheet-copy" data-copy-el="#contact-sheet-key">Copy key</button>
+    <a href="{{.Mailto}}">Open mail client</a>
+    <a href="/pgp.asc">pgp.asc</a>
+  </div>
+</dialog>{{end}}
 {{end}}

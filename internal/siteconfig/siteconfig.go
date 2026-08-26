@@ -165,6 +165,46 @@ func (c *Config) ShowLinkNotes() bool {
 	return c != nil && c.LinksStyle != LinksStyleMinimal
 }
 
+// ContactHref is the first social link that is the site's email: icon "email"
+// or a mailto: href. Empty when neither is configured. The footer Contact
+// link and the PGP lookup both use this so they cannot drift.
+func (c *Config) ContactHref() string {
+	if c == nil {
+		return ""
+	}
+	for _, s := range c.Social {
+		if s.Icon == "email" || strings.HasPrefix(strings.ToLower(s.Href), "mailto:") {
+			return s.Href
+		}
+	}
+	return ""
+}
+
+// ContactEmail is the address inside ContactHref, lowercased. Empty when
+// there is no mailto: contact link.
+func (c *Config) ContactEmail() string {
+	return mailtoAddress(c.ContactHref())
+}
+
+func mailtoAddress(href string) string {
+	href = strings.TrimSpace(href)
+	if !strings.HasPrefix(strings.ToLower(href), "mailto:") {
+		return ""
+	}
+	rest := href[len("mailto:"):]
+	if i := strings.IndexAny(rest, "?,"); i >= 0 {
+		rest = rest[:i]
+	}
+	rest = strings.TrimSpace(rest)
+	if decoded, err := url.QueryUnescape(rest); err == nil {
+		rest = decoded
+	}
+	if !strings.Contains(rest, "@") {
+		return ""
+	}
+	return strings.ToLower(rest)
+}
+
 type NavLink struct {
 	Label string `yaml:"label"`
 	Href  string `yaml:"href"`

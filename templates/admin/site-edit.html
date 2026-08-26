@@ -111,6 +111,29 @@ Content-Security-Policy automatically — without that the browser would refuse 
 <button type="submit">Add</button>
 </form>
 </section>
+
+{{if .PGPEnabled}}<section class="admin-section">
+<h3 class="admin-h3">PGP</h3>
+{{if .ContactEmail}}
+{{with .PGP}}
+{{if .Armored}}
+<p class="admin-hint">Looked up <code>{{.Email}}</code> on keys.openpgp.org.
+{{if .Fingerprint}}Fingerprint {{.FingerprintDisplay}}.{{end}}
+Fetched {{.FetchedAt.UTC.Format "2006-01-02 15:04"}} UTC.</p>
+{{else}}
+<p class="admin-hint">No verified key on keys.openpgp.org for <code>{{.Email}}</code>.
+{{if not .FetchedAt.IsZero}}Last looked up {{.FetchedAt.UTC.Format "2006-01-02 15:04"}} UTC.{{end}}</p>
+{{end}}
+{{else}}
+<p class="admin-hint">Contact address is <code>{{$.ContactEmail}}</code>. The public key is fetched on the next rebuild.</p>
+{{end}}
+<form method="post" action="/admin/site/pgp/refresh" class="admin-actions">
+<button type="submit" class="admin-mini-btn">Refresh key</button>
+</form>
+{{else}}
+<p class="admin-hint">Add a mailto: social link and the public key for that address is fetched from keys.openpgp.org, shown on the contact sheet, and published at <code>/pgp.asc</code>.</p>
+{{end}}
+</section>{{end}}
 </main>
 {{template "admin-footer"}}
 {{end}}
