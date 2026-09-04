@@ -85,6 +85,46 @@ func TestAdminAuthedPagesRender(t *testing.T) {
 	}
 }
 
+func TestAdminNavigationGroupsAndMarksCurrentPage(t *testing.T) {
+	d := newTestDepsWithAdmin(t)
+	cases := []struct{ title, label, current string }{
+		{"Dashboard", "Manage", "/admin"},
+		{"Posts", "Manage", "/admin/posts"},
+		{"New Post", "Manage", "/admin/posts"},
+		{"Edit Post", "Manage", "/admin/posts"},
+		{"Media", "Manage", "/admin/media"},
+		{"Links", "Links", "/admin/links"},
+		{"Site Config", "Site", "/admin/site"},
+		{"API & MCP", "API", "/admin/integrations"},
+		{"Activity", "Activity", "/admin/activity"},
+		{"Webmentions", "Mentions", "/admin/mentions"},
+		{"Backups", "Backups", "/admin/backups"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.title, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			d.deps.adminTmpls.render(rec, "activity", d.deps.adminData(tc.title, map[string]any{"Items": nil}))
+			body := rec.Body.String()
+			for _, want := range []string{`<summary>` + tc.label + ` <span`, `href="` + tc.current + `" aria-current="page"`} {
+				if !strings.Contains(body, want) {
+					t.Errorf("admin navigation missing %q", want)
+				}
+			}
+			if strings.Contains(body, `href="/admin">Dashboard</a>`) {
+				t.Error("dashboard is duplicated beside its linked brand")
+			}
+		})
+	}
+	rec := httptest.NewRecorder()
+	d.deps.adminTmpls.render(rec, "activity", d.deps.adminData("Activity", map[string]any{"Items": nil}))
+	body := rec.Body.String()
+	for _, href := range []string{"/admin/links", "/admin/mentions", "/admin/site", "/admin/integrations", "/admin/activity", "/admin/backups"} {
+		if !strings.Contains(body, `href="`+href+`"`) {
+			t.Errorf("admin navigation missing %q", href)
+		}
+	}
+}
+
 func TestAdminPostEditExistingSlug(t *testing.T) {
 	d := newTestDepsWithAdmin(t)
 	rec := httptest.NewRecorder()

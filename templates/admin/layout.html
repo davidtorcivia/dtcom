@@ -17,17 +17,27 @@
 <body>
 <div class="site-container">
 <header class="site-header">
-<div class="brand-title"><a href="/admin">dtcom admin</a></div>
-<nav class="nav-right" aria-label="Admin">
-<a href="/admin">Dashboard</a>
-<a href="/admin/posts">Posts</a>
-<a href="/admin/media">Media</a>
-<a href="/admin/links">Links</a>
-<a href="/admin/site">Site</a>
-<a href="/admin/integrations">API</a>
-<a href="/admin/activity">Activity</a>
-<a href="/admin/mentions">Mentions</a>
-<a href="/admin/backups">Backups</a>
+<div class="brand-title"><a href="/admin"{{if eq .Title "Dashboard"}} aria-current="page"{{end}}>dtcom admin</a></div>
+<nav class="nav-right admin-nav" aria-label="Admin">
+<a href="/admin/posts"{{if or (eq .Title "Posts") (eq .Title "New Post") (eq .Title "Edit Post")}} aria-current="page"{{end}}>Posts</a>
+<a href="/admin/media"{{if eq .Title "Media"}} aria-current="page"{{end}}>Media</a>
+<details class="admin-nav-more">
+<summary>{{if eq .Title "Links"}}Links{{else if eq .Title "Site Config"}}Site{{else if eq .Title "API & MCP"}}API{{else if eq .Title "Activity"}}Activity{{else if eq .Title "Webmentions"}}Mentions{{else if eq .Title "Backups"}}Backups{{else}}Manage{{end}} <span class="admin-nav-caret" aria-hidden="true">▾</span></summary>
+<div class="admin-nav-panel">
+<div class="admin-nav-group">
+<span class="admin-nav-heading">Content</span>
+<a href="/admin/links"{{if eq .Title "Links"}} aria-current="page"{{end}}>Links</a>
+<a href="/admin/mentions"{{if eq .Title "Webmentions"}} aria-current="page"{{end}}>Webmentions</a>
+</div>
+<div class="admin-nav-group">
+<span class="admin-nav-heading">System</span>
+<a href="/admin/site"{{if eq .Title "Site Config"}} aria-current="page"{{end}}>Site settings</a>
+<a href="/admin/integrations"{{if eq .Title "API & MCP"}} aria-current="page"{{end}}>API access</a>
+<a href="/admin/activity"{{if eq .Title "Activity"}} aria-current="page"{{end}}>Activity log</a>
+<a href="/admin/backups"{{if eq .Title "Backups"}} aria-current="page"{{end}}>Backups</a>
+</div>
+</div>
+</details>
 <a href="/" target="_blank" rel="noopener">View site</a>
 <form method="post" action="/admin/logout" class="admin-inline-form"><button type="submit" class="nav-link-btn">Logout</button></form>
 </nav>
