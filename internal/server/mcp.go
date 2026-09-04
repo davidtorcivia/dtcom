@@ -474,6 +474,9 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		Annotations: writes("Edit an article", true),
 		Description: "Update an existing article identified by slug. Any field may be omitted to keep the current value." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args updateArticleArgs) (*mcp.CallToolResult, articleResult, error) {
+		if args.ExpectedRevision == "" {
+			return nil, articleResult{}, errors.New("expected_revision is required")
+		}
 		a, err := d.findArticleBySlug(args.Slug)
 		if err != nil {
 			return nil, articleResult{}, err
@@ -566,6 +569,9 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		Annotations: destroys("Delete an article"),
 		Description: "Delete an article by slug. Removes the .md file and rebuilds.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args deleteArticleArgs) (*mcp.CallToolResult, articleResult, error) {
+		if args.ExpectedRevision == "" {
+			return nil, articleResult{}, errors.New("expected_revision is required")
+		}
 		status, err := d.deleteArticleRevision(args.Slug, actorFromContext(ctx), args.ExpectedRevision)
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("delete failed (%d): %w", status, err)

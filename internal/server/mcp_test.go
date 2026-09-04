@@ -161,6 +161,12 @@ func TestMCPUpdateArticleOmittedVsEmpty(t *testing.T) {
 	}
 
 	call(1, "create_article", `{"title":"Held Note","body":"body text","description":"a summary","tags":["one"]}`)
+	for _, tool := range []string{"update_article", "delete_article"} {
+		got := call(10, tool, `{"slug":"held-note","expected_revision":""}`).Body.String()
+		if !containsStr(got, "expected_revision is required") {
+			t.Fatalf("%s accepted an empty revision: %s", tool, got)
+		}
+	}
 
 	// Omitting description leaves it alone.
 	revision := articleRevision(t, d, "held-note")
