@@ -365,7 +365,7 @@ func TestFrontmatterSurvivesAwkwardValues(t *testing.T) {
 		Tags:        []string{"color, grading", "a]b", "  spaced  "},
 		Body:        "Body\r\nwith CRLF",
 	}
-	out := renderArticleFile(in, "2026-01-01", "slug")
+	out := renderArticleFile(in, "2026-01-01")
 
 	// The generated file must round-trip through the loader unchanged.
 	dir := t.TempDir()
@@ -400,7 +400,7 @@ func TestFrontmatterSurvivesAwkwardValues(t *testing.T) {
 func TestCreateRejectsDuplicateSlugAcrossDates(t *testing.T) {
 	d := newTestDeps(t)
 	in := articleInput{Title: "Hello", Date: "2027-05-05", Body: "x"}
-	_, status, err := d.deps.createArticle(in)
+	_, _, status, err := d.deps.createArticle(in)
 	if err == nil {
 		t.Fatalf("expected a conflict, got status %d", status)
 	}

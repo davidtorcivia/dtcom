@@ -71,6 +71,8 @@ func openDB(path string) (*sql.DB, error) {
 
 func (s *Store) Close() error { return s.conn().Close() }
 
+func (s *Store) Ping() error { return s.conn().Ping() }
+
 const schema = `
 CREATE TABLE IF NOT EXISTS links (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,6 +115,34 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_active ON api_tokens(revoked_at);
 
+CREATE TABLE IF NOT EXISTS article_audit (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor           TEXT NOT NULL,
+    action          TEXT NOT NULL,
+    slug            TEXT NOT NULL,
+    source_name     TEXT NOT NULL,
+    before_revision TEXT NOT NULL,
+    after_revision  TEXT NOT NULL,
+    before_source   BLOB NOT NULL,
+    after_source    BLOB NOT NULL,
+    created_at      INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_article_audit_created ON article_audit(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS webmentions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    direction   TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    error       TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    verified_at INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(direction, source, target)
+);
+CREATE INDEX IF NOT EXISTS idx_webmentions_queue ON webmentions(direction, status, created_at DESC);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
     slug, title, body, description, tags, tags_unindexed UNINDEXED,
     tokenize = 'porter unicode61'
@@ -120,27 +150,36 @@ CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
 `
 
 func (s *Store) migrate() error {
-	if _, err := s.conn().Exec(schema); err != nil {
+	return migrateDB(s.conn())
+}
+
+func migrateDB(db *sql.DB) error {
+	if _, err := db.Exec(schema); err != nil {
 		return err
 	}
 	// Columns added to views after the table shipped. CREATE TABLE above only
 	// runs on a fresh database, and the deployed one lives in a volume that
 	// outlives every release, so anything new has to arrive this way.
-	return s.addColumns("views", map[string]string{
+	if err := addColumns(db, "views", map[string]string{
 		"referrer": "TEXT NOT NULL DEFAULT ''",
 		"country":  "TEXT NOT NULL DEFAULT ''",
 		"city":     "TEXT NOT NULL DEFAULT ''",
 		"dwell":    "INTEGER NOT NULL DEFAULT 0",
 		"lat":      "REAL NOT NULL DEFAULT 0",
 		"lon":      "REAL NOT NULL DEFAULT 0",
+	}); err != nil {
+		return err
+	}
+	return addColumns(db, "api_tokens", map[string]string{
+		"scopes": "TEXT NOT NULL DEFAULT 'read,drafts,publish,delete,ops'",
 	})
 }
 
 // addColumns adds any of cols the table does not already have. SQLite has no
 // ADD COLUMN IF NOT EXISTS, and matching on the duplicate-column error text is
 // a promise about wording no driver makes, so the existing columns are read.
-func (s *Store) addColumns(table string, cols map[string]string) error {
-	rows, err := s.conn().Query(`SELECT name FROM pragma_table_info(?)`, table)
+func addColumns(db *sql.DB, table string, cols map[string]string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return fmt.Errorf("inspect %s: %w", table, err)
 	}
@@ -157,7 +196,7 @@ func (s *Store) addColumns(table string, cols map[string]string) error {
 	}
 	rows.Close() // the ALTERs below need the read to be finished
 	for name, decl := range cols {
-		if _, err := s.conn().Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + decl); err != nil {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + decl); err != nil {
 			return fmt.Errorf("add %s.%s: %w", table, name, err)
 		}
 	}

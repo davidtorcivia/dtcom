@@ -18,6 +18,7 @@ import (
 	"davidtorcivia.com/dtcom/internal/feeds"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
+	"davidtorcivia.com/dtcom/internal/webmention"
 )
 
 // Deps bundles every collaborator the handlers need. The Site field is a
@@ -31,16 +32,17 @@ import (
 // Instead they write a fresh copy to disk and call ReloadSite before
 // rebuilding, so every reader observes a single consistent pointer.
 type Deps struct {
-	Cfg        *config.Config
-	Site       func() *siteconfig.Config
-	ReloadSite func() error
-	Store      *store.Store
-	Engine     *build.Engine
-	Poller     *feeds.Poller
-	Backups    *backup.Service
-	Auth       *auth.Auth
-	adminTmpls *adminTemplateStore
-	limits     *limiters
+	Cfg         *config.Config
+	Site        func() *siteconfig.Config
+	ReloadSite  func() error
+	Store       *store.Store
+	Engine      *build.Engine
+	Poller      *feeds.Poller
+	Backups     *backup.Service
+	Auth        *auth.Auth
+	Webmentions *webmention.Service
+	adminTmpls  *adminTemplateStore
+	limits      *limiters
 
 	// Assets fingerprints /static URLs for the admin templates. Share the
 	// engine's instance so a rebuild's refresh is visible here too; left nil,
@@ -62,6 +64,9 @@ type Deps struct {
 	// (does this slug exist?) needs its own lock or two concurrent writers
 	// can both pass the check and clobber each other.
 	postMu sync.Mutex
+	// ponytail: one site-wide lock is sufficient for a single-author CMS;
+	// split by section only if measured contention ever appears.
+	siteMu sync.Mutex
 
 	// renditionWG tracks in-flight background rendition goroutines, so tests
 	// can drain them before TempDir cleanup; see generateRenditions.

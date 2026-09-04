@@ -24,6 +24,7 @@ import (
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
 	"davidtorcivia.com/dtcom/internal/watcher"
+	"davidtorcivia.com/dtcom/internal/webmention"
 )
 
 // Version is the build version. Declared as a var, not a const, so it can be
@@ -132,6 +133,9 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	go scheduleLoop(ctx, engine)
+	mentions := webmention.New(st, cfg.BaseURL, filepath.Join(cfg.ContentDir, "posts"))
+	go mentions.Start(ctx)
 
 	// poller — runs on interval until shutdown. OnPoll fires after each Poll
 	// (both the initial one and every periodic tick); when imports happened it
@@ -195,12 +199,13 @@ func run() error {
 			sitePtr.Store(s)
 			return nil
 		},
-		Store:   st,
-		Engine:  engine,
-		Poller:  poller,
-		Backups: backups,
-		Auth:    a,
-		Assets:  fingerprints,
+		Store:       st,
+		Engine:      engine,
+		Poller:      poller,
+		Backups:     backups,
+		Auth:        a,
+		Assets:      fingerprints,
+		Webmentions: mentions,
 	})
 
 	srv := &http.Server{
@@ -356,6 +361,24 @@ func watchLoop(ctx context.Context, events <-chan string, engine *build.Engine) 
 				slog.Warn("watcher-triggered rebuild", "err", err)
 			} else {
 				slog.Info("rebuilt after content change")
+			}
+		}
+	}
+}
+
+func scheduleLoop(ctx context.Context, engine *build.Engine) {
+	tick := time.NewTicker(15 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-tick.C:
+			next := engine.NextPublishAt()
+			if !next.IsZero() && !now.Before(next) {
+				if err := engine.Rebuild(); err != nil {
+					slog.Error("scheduled publish", "err", err)
+				}
 			}
 		}
 	}

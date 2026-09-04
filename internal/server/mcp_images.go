@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -52,8 +54,11 @@ type storedImage struct {
 	// guessing from filenames which of two pictures is which.
 	Theme string `json:"theme,omitempty"`
 	// Pair is the URL of the other half, when there is one.
-	Pair  string `json:"pair,omitempty"`
-	Bytes int64  `json:"bytes"`
+	Pair   string   `json:"pair,omitempty"`
+	Bytes  int64    `json:"bytes"`
+	Width  int      `json:"width,omitempty"`
+	Height int      `json:"height,omitempty"`
+	UsedBy []string `json:"used_by,omitempty"`
 }
 
 // Wrapped in an object for the reason given beside articleListResult in
@@ -99,7 +104,7 @@ func registerImageTools(srv *mcp.Server, d *Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "add_image",
-		Annotations: writes("Add an image", false),
+		Annotations: fetches("Add an image"),
 		Description: "Store an image on the site and return the markdown line for it. Give " +
 			"either url (strongly preferred) or data. A base64 data payload has to survive the " +
 			"whole client-side path as tool arguments, which for anything past a few hundred " +
@@ -196,11 +201,36 @@ func (d *Deps) listStoredImages(query string) ([]storedImage, error) {
 		if info, err := e.Info(); err == nil {
 			size = info.Size()
 		}
-		out = append(out, storedImage{URL: "/images/" + e.Name(), Bytes: size})
+		item := storedImage{URL: "/images/" + e.Name(), Bytes: size}
+		if f, err := os.Open(filepath.Join(d.Cfg.ImagesDir, e.Name())); err == nil {
+			if cfg, _, err := image.DecodeConfig(f); err == nil {
+				item.Width, item.Height = cfg.Width, cfg.Height
+			}
+			_ = f.Close()
+		}
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].URL < out[j].URL })
 	markThemePairs(out, d.postsDir())
+	if err := markImageUsage(out, d.postsDir()); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+func markImageUsage(imgs []storedImage, postsDir string) error {
+	arts, err := build.LoadArticles(postsDir)
+	if err != nil {
+		return err
+	}
+	for i := range imgs {
+		for _, a := range arts {
+			if strings.Contains(a.Body, imgs[i].URL) || a.Cover == imgs[i].URL {
+				imgs[i].UsedBy = append(imgs[i].UsedBy, a.Slug)
+			}
+		}
+	}
+	return nil
 }
 
 // markThemePairs fills in Theme and Pair for images already used as a

@@ -51,19 +51,13 @@ func validFeedURL(raw string) error {
 // the result. Every feed handler goes through here so none of them mutates the
 // live shared config.
 func (d *Deps) mutateFeeds(fn func([]siteconfig.RSSFeed) ([]siteconfig.RSSFeed, error)) error {
-	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
-	if err != nil {
+	return d.mutateSite(func(site *siteconfig.Config) error {
+		feeds, err := fn(site.RSSFeeds)
+		if err == nil {
+			site.RSSFeeds = feeds
+		}
 		return err
-	}
-	feeds, err := fn(site.RSSFeeds)
-	if err != nil {
-		return err
-	}
-	site.RSSFeeds = feeds
-	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
-		return err
-	}
-	return d.reloadSite()
+	})
 }
 
 func (d *Deps) adminFeedAdd(w http.ResponseWriter, r *http.Request) {

@@ -2,8 +2,8 @@
 {{template "admin-header" .}}
 <main class="admin-main">
 <h2 class="admin-h2">API &amp; MCP</h2>
-<p class="admin-lede">Everything on this site can be read and written over HTTP. The REST API and the MCP
-server share one bearer token — the <code>DTCOM_API_TOKEN</code> this process was started with.</p>
+<p class="admin-lede">Everything on this site can be read and written over HTTP. The REST API and MCP
+server accept the bootstrap credential or a separately scoped token for each agent.</p>
 
 {{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
 
@@ -28,19 +28,28 @@ one can be withdrawn without disturbing the others. Only a hash is stored; a tok
 creation.</p>
 
 <form method="post" action="/admin/tokens" class="admin-add-form">
+<input type="hidden" name="scopes_present" value="1">
 <label class="admin-sr-only" for="t-name">Token name</label>
 <input id="t-name" name="name" placeholder="What is this for? e.g. &ldquo;Claude Desktop&rdquo;" maxlength="60" required>
+<span class="token-scopes">
+<label><input type="checkbox" name="scope_read" checked> read</label>
+<label><input type="checkbox" name="scope_drafts" checked> drafts</label>
+<label><input type="checkbox" name="scope_publish"> publish</label>
+<label><input type="checkbox" name="scope_delete"> delete</label>
+<label><input type="checkbox" name="scope_ops"> ops</label>
+</span>
 <button type="submit">Create token</button>
 </form>
 
 <table class="endpoint-table token-table">
-<thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+<thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Created</th><th>Last used</th><th></th></tr></thead>
 <tbody>
 <tr class="token-env">
 <td>Bootstrap <em>(DTCOM_API_TOKEN)</em></td>
 {{/* This cell doubles as the reveal target, so the value appears where the
      other tokens show their prefix instead of on a line of its own. */}}
 <td><code class="token-inline" id="api-token" data-token="{{.Token}}" data-mask="{{.TokenPrefix}}…">{{.TokenPrefix}}…</code></td>
+<td><code>all</code></td>
 <td>from the environment</td>
 <td>—</td>
 <td><button type="button" class="admin-mini-btn" data-action="reveal" data-target="api-token">Reveal</button>
@@ -49,6 +58,7 @@ creation.</p>
 {{range .Tokens}}<tr{{if not .Active}} class="token-revoked"{{end}}>
 <td>{{.Name}}</td>
 <td><code>{{.Prefix}}…</code></td>
+<td><code>{{.Scopes}}</code></td>
 <td>{{formatDateUnix .CreatedAt}}</td>
 <td>{{if .LastUsedAt}}{{formatDateUnix .LastUsedAt}}{{else}}never{{end}}</td>
 <td>{{if .Active}}<form method="post" action="/admin/tokens/{{.ID}}/revoke"
@@ -119,7 +129,7 @@ which is how you attach one as context without the model having to fetch it.</p>
 
 <section class="admin-section">
 <h3 class="admin-h3">REST API</h3>
-<p class="admin-hint">Send the token as <code>Authorization: Bearer &lt;token&gt;</code>. Bodies and responses are JSON.</p>
+<p class="admin-hint">Send the token as <code>Authorization: Bearer &lt;token&gt;</code>. Bodies and responses are JSON. Article updates and deletes require the revision from <code>ETag</code> or <code>expected_revision</code>, preventing stale agents from overwriting newer work.</p>
 <div class="code-block-wrap">
 <button type="button" class="admin-mini-btn code-copy" data-action="copy" data-copy="curl -H &#34;Authorization: Bearer {{.Token}}&#34; {{.BaseURL}}/api/v1/articles">Copy curl</button>
 <pre class="code-block"><code>curl -H "Authorization: Bearer $DTCOM_API_TOKEN" \
@@ -150,7 +160,10 @@ curl -X POST {{.BaseURL}}/api/v1/articles \
 <tr><td><span class="method method-GET">GET</span></td><td><code>/api/search?q=</code></td><td>Full-text search over published articles.</td></tr>
 <tr><td><span class="method method-POST">POST</span></td><td><code>/api/track</code></td><td>Page-view beacon. Only accepts paths that exist.</td></tr>
 <tr><td><span class="method method-GET">GET</span></td><td><code>/healthz</code></td><td>Liveness probe for a proxy or orchestrator.</td></tr>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/readyz</code></td><td>Database and last-build readiness.</td></tr>
 <tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}.md</code></td><td>Markdown source of any post.</td></tr>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}/agent.md</code></td><td>Compressed agent-oriented version.</td></tr>
+<tr><td><span class="method method-POST">POST</span></td><td><code>/webmention</code></td><td>Receive and verify a Webmention.</td></tr>
 </tbody>
 </table>
 </section>

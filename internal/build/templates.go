@@ -34,20 +34,28 @@ func (t *templateStore) Load(templatesDir string, funcs template.FuncMap) error 
 // through would otherwise leave a truncated page on disk, which the server
 // would then happily serve.
 func (t *templateStore) render(name, outPath string, data any) error {
-	if t.tmpl == nil {
-		return fmt.Errorf("templates not loaded")
-	}
-	var buf bytes.Buffer
-	if err := t.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-		return fmt.Errorf("execute %s: %w", name, err)
+	buf, err := t.execute(name, data)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
-	if old, err := os.ReadFile(outPath); err == nil && bytes.Equal(old, buf.Bytes()) {
+	if old, err := os.ReadFile(outPath); err == nil && bytes.Equal(old, buf) {
 		return nil
 	}
-	return writeAtomic(outPath, buf.Bytes())
+	return writeAtomic(outPath, buf)
+}
+
+func (t *templateStore) execute(name string, data any) ([]byte, error) {
+	if t.tmpl == nil {
+		return nil, fmt.Errorf("templates not loaded")
+	}
+	var buf bytes.Buffer
+	if err := t.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		return nil, fmt.Errorf("execute %s: %w", name, err)
+	}
+	return buf.Bytes(), nil
 }
 
 // helperFuncs returns the template function map used across all templates.

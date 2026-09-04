@@ -469,7 +469,7 @@ check('posts to the save endpoint', fetches.map((f) => f.url), ['/admin/posts/sa
 check('asks for JSON', fetches[0]?.opts?.headers?.Accept, 'application/json');
 check('sends credentials', fetches[0]?.opts?.credentials, 'same-origin');
 check('slug written back for the next save', slugField.value, 'derived-slug');
-check('reports when it saved', /^Saved \d\d:\d\d/.test(statusEl.textContent), true);
+check('reports when it saved', /^✓ Saved \d\d:\d\d/.test(statusEl.textContent), true);
 
 console.log('an expired session does not swallow the draft:');
 saveResponse = { ok: false, status: 401, body: {} };

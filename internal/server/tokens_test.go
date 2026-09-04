@@ -49,7 +49,11 @@ func TestAPITokenLifecycle(t *testing.T) {
 		t.Errorf("bootstrap token = %d, want 200", got.Code)
 	}
 	// A near-miss does not.
-	if got := d.apiGet(raw[:len(raw)-1] + "0"); got.Code == http.StatusOK {
+	replacement := "0"
+	if strings.HasSuffix(raw, replacement) {
+		replacement = "1"
+	}
+	if got := d.apiGet(raw[:len(raw)-1] + replacement); got.Code == http.StatusOK {
 		t.Error("a modified token authenticated")
 	}
 

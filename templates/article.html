@@ -3,14 +3,17 @@
 <head>
   <title>{{$a.Title}} — {{$site.Title}}</title>
   <meta name="description" content="{{$a.Description}}">
+  {{if .Preview}}<meta name="robots" content="noindex, nofollow">{{end}}
   <link rel="canonical" href="{{.URL}}">
   <link rel="alternate" type="text/markdown" href="/posts/{{$a.Slug}}.md">
+  <link rel="alternate" type="text/markdown" title="Agent version" href="/posts/{{$a.Slug}}/agent.md">
   <meta property="og:title" content="{{$a.Title}}">
   <meta property="og:description" content="{{$a.Description}}">
   <meta property="og:url" content="{{.URL}}">
   <meta property="og:type" content="article">
   <meta property="og:site_name" content="{{$site.Title}}">
   <meta property="article:published_time" content="{{rfc3339 $a.Date}}">
+  {{if not $a.Updated.IsZero}}<meta property="article:modified_time" content="{{rfc3339 $a.Updated}}">{{end}}
   {{/* .OGImage is the post's `cover` when it has one, and a card generated at
        build time when it does not — so every post advertises a real image and
        there is no case left that needs the small summary card. */}}
@@ -35,7 +38,7 @@
 {{/* The view beacon's target is a data attribute rather than an inline
      <script> assignment, so the page needs no inline script and the CSP can
      forbid them outright. */}}
-<body data-track-path="/posts/{{$a.Slug}}">
+<body{{if not .Preview}} data-track-path="/posts/{{$a.Slug}}"{{end}}>
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="site-container">
   {{template "site-header" .}}

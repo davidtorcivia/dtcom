@@ -1,0 +1,17 @@
+{{define "activity"}}
+{{template "admin-header" .}}
+<main class="admin-main">
+<h2 class="admin-h2">Publishing activity</h2>
+<p class="admin-lede">Every article mutation records its actor and exact before/after revision. Undo only runs while the article still matches that event.</p>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+<table class="endpoint-table">
+<thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Article</th><th>Revision</th><th></th></tr></thead>
+<tbody>{{range .Items}}<tr>
+<td>{{formatDateUnix .CreatedAt}}</td><td>{{.Actor}}</td><td>{{.Action}}</td>
+<td><a href="/admin/posts/{{.Slug}}/edit">{{.Slug}}</a></td><td><code>{{.AfterRevision}}</code></td>
+<td><form method="post" action="/admin/activity/{{.ID}}/undo" data-confirm="Undo this change?" data-confirm-detail="Undo is refused if the article has changed since." data-confirm-action="Undo"><button class="admin-link-btn">undo</button></form></td>
+</tr>{{else}}<tr><td colspan="6">No article activity yet.</td></tr>{{end}}</tbody>
+</table>
+</main>
+{{template "admin-footer" .}}
+{{end}}

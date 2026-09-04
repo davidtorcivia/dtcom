@@ -128,7 +128,7 @@ start arriving with the next views.</p>{{end}}
 </div>
 <ul class="admin-list">
 {{range .Recent}}<li>
-<span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{end}}</span>
+<span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{else if isFuture .PublishAt}} <em class="admin-draft-flag">(scheduled {{formatDateTimeLocal .PublishAt}})</em>{{end}}</span>
 <a class="admin-cancel" href="/posts/{{.Slug}}" target="_blank" rel="noopener">view</a>
 </li>{{else}}<li class="admin-empty">No posts yet. <a href="/admin/posts/new">Write the first one.</a></li>{{end}}
 </ul>

@@ -1,0 +1,19 @@
+{{define "media"}}
+{{template "admin-header" .}}
+<main class="admin-main">
+<div class="admin-header-row"><h2 class="admin-h2">Media</h2></div>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+<form method="post" action="/admin/media/upload" enctype="multipart/form-data" class="admin-add-form">
+<input type="file" name="file" accept="image/*" required><button>Upload</button>
+</form>
+<div class="media-grid">{{range .Images}}<article class="media-card">
+<a href="{{.URL}}" target="_blank" rel="noopener"><img src="{{.URL}}" alt="" loading="lazy"></a>
+<code>{{.URL}}</code>
+<span>{{if .Width}}{{.Width}}×{{.Height}} · {{end}}{{.Bytes}} bytes</span>
+{{if .UsedBy}}<span>Used by {{range $i, $slug := .UsedBy}}{{if $i}}, {{end}}<a href="/admin/posts/{{$slug}}/edit">{{$slug}}</a>{{end}}</span>{{else}}<span>Unused</span>{{end}}
+<div><button type="button" class="admin-mini-btn" data-action="copy" data-copy="{{.URL}}">Copy URL</button>
+{{if not .UsedBy}}<form method="post" action="/admin/media/{{imageName .URL}}/delete" class="admin-inline-form" data-confirm="Delete this unused image?" data-confirm-detail="Its master and generated renditions will be removed." data-confirm-action="Delete image"><button class="admin-link-btn">delete</button></form>{{end}}</div>
+</article>{{else}}<p>No uploaded media yet.</p>{{end}}</div>
+</main>
+{{template "admin-footer" .}}
+{{end}}

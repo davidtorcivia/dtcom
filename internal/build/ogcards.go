@@ -30,7 +30,7 @@ func (e *Engine) ogCard(c OGCard, written *pathSet) (string, error) {
 	}, "\x00")
 	sum := sha256.Sum256([]byte(payload))
 	name := hex.EncodeToString(sum[:])[:16] + ".png"
-	path := filepath.Join(e.cfg.PublicDir, "og", name)
+	path := filepath.Join(e.outputRoot(), "og", name)
 
 	if _, err := os.Stat(path); err != nil {
 		data, renderErr := RenderOGCard(c)

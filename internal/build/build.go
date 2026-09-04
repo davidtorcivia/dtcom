@@ -20,6 +20,8 @@ import (
 	"davidtorcivia.com/dtcom/internal/store"
 )
 
+const generationDir = ".dtcom-generations"
+
 type EngineConfig struct {
 	ContentDir   string
 	PostsDir     string // defaults to ContentDir+"/posts"
@@ -51,7 +53,13 @@ type Engine struct {
 
 	// buildStart is when the running (or most recent) rebuild began reading
 	// content, in Unix nanoseconds. See BuildStartedAt.
-	buildStart atomic.Int64
+	buildStart  atomic.Int64
+	lastBuild   atomic.Int64
+	nextPublish atomic.Int64
+	activeDir   atomic.Value // string
+	lastErr     atomic.Value // string
+	outputDir   string       // guarded by mu; set only while building a generation
+	retiredDir  string       // previous generation, removed after the next switch
 }
 
 // BuildStartedAt reports when the running or most recent rebuild began reading
@@ -81,6 +89,21 @@ func (e *Engine) BuildStartedAt() time.Time {
 // tests that render no images.
 func (e *Engine) Images() *ImageIndex { return e.images }
 
+// Preview renders an article with the live public theme without publishing it.
+func (e *Engine) Preview(a Article) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	htmlBody, err := markdown.RenderWith(a.Body, e.images.Resolve)
+	if err != nil {
+		return nil, err
+	}
+	site := e.cfg.Site()
+	return e.tmpls.execute("article", e.pageVars(site, map[string]any{
+		"Article": a, "HTML": htmlBody, "URL": baseURL(site) + "/posts/" + a.Slug,
+		"OGImage": a.Cover, "HasMath": markdown.HasMath(htmlBody), "Preview": true,
+	}))
+}
+
 // NewEngine builds an engine and loads its templates. A template parse error
 // is returned rather than swallowed: every page render would fail on a nil
 // template, and the failure is far easier to act on at startup than as a
@@ -93,6 +116,8 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		cfg.Assets = assets.New(cfg.StaticDir)
 	}
 	e := &Engine{cfg: cfg, assets: cfg.Assets}
+	e.activeDir.Store(cfg.PublicDir)
+	e.lastErr.Store("")
 	if cfg.ImagesDir != "" {
 		e.images = NewImageIndex(cfg.ImagesDir)
 	}
@@ -104,10 +129,41 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 
 // Rebuild regenerates the entire public/ directory. Safe to call concurrently;
 // rebuilds serialize and coalesce via the mutex.
-func (e *Engine) Rebuild() error {
+func (e *Engine) Rebuild() (err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		if err != nil {
+			e.lastErr.Store(err.Error())
+		} else {
+			e.lastErr.Store("")
+		}
+	}()
 	e.buildStart.Store(time.Now().UnixNano())
+
+	generationRoot := filepath.Join(e.cfg.PublicDir, generationDir)
+	if e.PublicDir() == e.cfg.PublicDir {
+		_ = os.RemoveAll(generationRoot)
+	}
+	if err := os.MkdirAll(generationRoot, 0o755); err != nil {
+		return fmt.Errorf("create build generation root: %w", err)
+	}
+	stage, err := os.MkdirTemp(generationRoot, "generation-")
+	if err != nil {
+		return fmt.Errorf("create build generation: %w", err)
+	}
+	if err := cloneTree(e.PublicDir(), stage); err != nil {
+		_ = os.RemoveAll(stage)
+		return fmt.Errorf("seed build generation: %w", err)
+	}
+	e.outputDir = stage
+	succeeded := false
+	defer func() {
+		e.outputDir = ""
+		if !succeeded {
+			_ = os.RemoveAll(stage)
+		}
+	}()
 
 	// Templates are reloaded on every rebuild so an edit to templates/ takes
 	// effect without a restart — which is what the docker-compose bind mount
@@ -130,12 +186,20 @@ func (e *Engine) Rebuild() error {
 		return fmt.Errorf("load articles: %w", err)
 	}
 	published := make([]Article, 0, len(arts))
+	now := time.Now()
+	var next time.Time
 	for _, a := range arts {
-		if !a.Draft {
-			published = append(published, a)
+		if a.Draft {
+			continue
 		}
+		if !a.PublishAt.IsZero() && a.PublishAt.After(now) {
+			if next.IsZero() || a.PublishAt.Before(next) {
+				next = a.PublishAt
+			}
+			continue
+		}
+		published = append(published, a)
 	}
-
 	// Every file this rebuild writes, so stale output can be pruned afterwards.
 	written := newPathSet()
 
@@ -190,8 +254,84 @@ func (e *Engine) Rebuild() error {
 			return fmt.Errorf("reindex: %w", err)
 		}
 	}
+	old := e.PublicDir()
+	e.activeDir.Store(stage)
+	if next.IsZero() {
+		e.nextPublish.Store(0)
+	} else {
+		e.nextPublish.Store(next.Unix())
+	}
+	succeeded = true
+	e.lastBuild.Store(time.Now().Unix())
+	if e.retiredDir != "" && e.retiredDir != e.cfg.PublicDir {
+		_ = os.RemoveAll(e.retiredDir)
+	}
+	if old != e.cfg.PublicDir {
+		e.retiredDir = old
+	}
 	return nil
 }
+
+func cloneTree(src, dst string) error {
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		return nil
+	}
+	return filepath.WalkDir(src, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		if rel == generationDir && entry.IsDir() {
+			return filepath.SkipDir
+		}
+		to := filepath.Join(dst, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(to, 0o755)
+		}
+		if err := os.Link(path, to); err == nil {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(to, data, 0o644)
+	})
+}
+
+// PublicDir is the complete generation currently served to readers.
+func (e *Engine) PublicDir() string {
+	if v := e.activeDir.Load(); v != nil {
+		return v.(string)
+	}
+	return e.cfg.PublicDir
+}
+
+func (e *Engine) outputRoot() string {
+	if e.outputDir != "" {
+		return e.outputDir
+	}
+	return e.PublicDir()
+}
+
+func (e *Engine) LastBuildAt() time.Time {
+	if unix := e.lastBuild.Load(); unix != 0 {
+		return time.Unix(unix, 0)
+	}
+	return time.Time{}
+}
+
+func (e *Engine) NextPublishAt() time.Time {
+	if unix := e.nextPublish.Load(); unix != 0 {
+		return time.Unix(unix, 0)
+	}
+	return time.Time{}
+}
+
+func (e *Engine) LastBuildError() string { return e.lastErr.Load().(string) }
 
 // pathSet records the files a rebuild produced, in cleaned absolute-ish form,
 // so prune can tell current output from leftovers.
@@ -209,7 +349,7 @@ func (p *pathSet) has(path string) bool { return p.paths[filepath.Clean(path)] }
 // removes any directories left empty. This is what retires the page of a post
 // that was deleted or flipped to draft.
 func (e *Engine) prune(written *pathSet) error {
-	root := e.cfg.PublicDir
+	root := e.outputRoot()
 	var dirs []string
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -304,7 +444,7 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(e.cfg.PublicDir, "posts", a.Slug)
+	dir := filepath.Join(e.outputRoot(), "posts", a.Slug)
 	data := e.pageVars(site, map[string]any{
 		"Article": a,
 		"HTML":    htmlBody,
@@ -322,7 +462,15 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.writeFile(filepath.Join(e.cfg.PublicDir, "posts", a.Slug+".md"), src, written)
+	if err := e.writeFile(filepath.Join(e.outputRoot(), "posts", a.Slug+".md"), src, written); err != nil {
+		return err
+	}
+	agent := a.Agent
+	if strings.TrimSpace(agent) == "" {
+		agent = a.Description
+	}
+	agentDoc := fmt.Sprintf("# %s\n\n%s\n\nCanonical: %s/posts/%s\nRevision: %s\n", a.Title, agent, baseURL(site), a.Slug, a.Revision)
+	return e.writeFile(filepath.Join(dir, "agent.md"), []byte(agentDoc), written)
 }
 
 // renderHome renders the front page: bio + a date-desc index of published
@@ -333,7 +481,7 @@ func (e *Engine) renderHome(published []Article, written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("home", filepath.Join(e.cfg.PublicDir, "index.html"), e.pageVars(site, map[string]any{
+	return e.renderPage("home", filepath.Join(e.outputRoot(), "index.html"), e.pageVars(site, map[string]any{
 		"Articles": published,
 		"OGImage":  ogImage,
 	}), written)
@@ -354,7 +502,7 @@ func (e *Engine) renderLinks(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("links", filepath.Join(e.cfg.PublicDir, "links", "index.html"), e.pageVars(site, map[string]any{
+	return e.renderPage("links", filepath.Join(e.outputRoot(), "links", "index.html"), e.pageVars(site, map[string]any{
 		"Links":   links,
 		"OGImage": ogImage,
 	}), written)
@@ -368,7 +516,7 @@ func (e *Engine) renderSearch(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("search", filepath.Join(e.cfg.PublicDir, "search", "index.html"), e.pageVars(site, map[string]any{
+	return e.renderPage("search", filepath.Join(e.outputRoot(), "search", "index.html"), e.pageVars(site, map[string]any{
 		"OGImage": ogImage,
 	}), written)
 }
@@ -380,7 +528,7 @@ func (e *Engine) render404(written *pathSet) error {
 	if err != nil {
 		return err
 	}
-	return e.renderPage("notfound", filepath.Join(e.cfg.PublicDir, "404.html"), e.pageVars(site, map[string]any{
+	return e.renderPage("notfound", filepath.Join(e.outputRoot(), "404.html"), e.pageVars(site, map[string]any{
 		"OGImage": ogImage,
 	}), written)
 }
@@ -390,18 +538,25 @@ func (e *Engine) renderFeed(published []Article, written *pathSet) error {
 	site := e.cfg.Site()
 	feedArts := make([]feeds.Article, 0, len(published))
 	for _, a := range published {
+		content, err := markdown.RenderWith(a.Body, e.images.Resolve)
+		if err != nil {
+			return err
+		}
 		feedArts = append(feedArts, feeds.Article{
 			Title:       a.Title,
 			Slug:        a.Slug,
 			Date:        a.Date,
+			Updated:     a.Updated,
 			Description: a.Description,
+			Content:     content,
+			Tags:        a.Tags,
 		})
 	}
 	out, err := feeds.RenderFeed(site, feedArts)
 	if err != nil {
 		return err
 	}
-	return e.writeFile(filepath.Join(e.cfg.PublicDir, "feed.xml"), []byte(out), written)
+	return e.writeFile(filepath.Join(e.outputRoot(), "feed.xml"), []byte(out), written)
 }
 
 // renderSitemap writes sitemap.xml covering the home, links, and each
@@ -431,10 +586,14 @@ func (e *Engine) renderSitemap(published []Article, written *pathSet) error {
 	// nothing there for a crawler — and listing a noindex page in the sitemap
 	// asks Google to crawl something it is simultaneously told to drop.
 	for _, a := range published {
-		addURL(base+"/posts/"+a.Slug, a.Date)
+		lastmod := a.Date
+		if a.Updated.After(lastmod) {
+			lastmod = a.Updated
+		}
+		addURL(base+"/posts/"+a.Slug, lastmod)
 	}
 	sb.WriteString("</urlset>\n")
-	return e.writeFile(filepath.Join(e.cfg.PublicDir, "sitemap.xml"), []byte(sb.String()), written)
+	return e.writeFile(filepath.Join(e.outputRoot(), "sitemap.xml"), []byte(sb.String()), written)
 }
 
 // renderRobots writes robots.txt allowing crawlers everywhere except the
@@ -447,7 +606,7 @@ func (e *Engine) renderRobots(written *pathSet) error {
 		"Disallow: /mcp\n" +
 		"Allow: /\n\n" +
 		"Sitemap: " + base + "/sitemap.xml\n"
-	return e.writeFile(filepath.Join(e.cfg.PublicDir, "robots.txt"), []byte(body), written)
+	return e.writeFile(filepath.Join(e.outputRoot(), "robots.txt"), []byte(body), written)
 }
 
 // baseURL returns the site's canonical URL without a trailing slash, so

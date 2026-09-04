@@ -52,9 +52,11 @@ func TestAPIArticleCRUD(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"body":"Hello.`) {
 		t.Errorf("get missing body:\n%s", rec.Body.String())
 	}
+	etag := rec.Header().Get("ETag")
 	// delete
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/articles/new-post", nil)
 	req.Header.Set("Authorization", "Bearer "+d.apiToken)
+	req.Header.Set("If-Match", etag)
 	rec = httptest.NewRecorder()
 	d.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {

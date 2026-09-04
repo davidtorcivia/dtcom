@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"syscall"
 	"time"
+
+	"davidtorcivia.com/dtcom/internal/safehttp"
 )
 
 // Fetching an image the caller only named by URL.
@@ -29,28 +29,8 @@ const (
 	maxImageRedirects = 3
 )
 
-var errPrivateAddress = errors.New("refusing to fetch from a private or loopback address")
-
-// publicIP reports whether an address is somewhere on the internet, as opposed
-// to somewhere on this machine or this network.
-func publicIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() {
-		return false
-	}
-	// 100.64.0.0/10, carrier-grade NAT — also what a Tailscale or similar
-	// overlay hands out, so it addresses machines this one can reach and the
-	// caller should not. net.IP.IsPrivate does not cover it (it is not one of
-	// the RFC 1918 blocks) but it is emphatically not the public internet.
-	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
-		return false
-	}
-	return true
-}
+var errPrivateAddress = safehttp.ErrPrivateAddress
+var publicIP = safehttp.PublicIP
 
 // imageFetchClient refuses to connect anywhere but the public internet.
 //
@@ -69,21 +49,7 @@ var imageFetchClient = &http.Client{
 		}
 		return nil
 	},
-	Transport: &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
-			Control: func(network, address string, _ syscall.RawConn) error {
-				host, _, err := net.SplitHostPort(address)
-				if err != nil {
-					return err
-				}
-				if !publicIP(net.ParseIP(host)) {
-					return fmt.Errorf("%w: %s", errPrivateAddress, host)
-				}
-				return nil
-			},
-		}).DialContext,
-	},
+	Transport: safehttp.PublicTransport(10 * time.Second),
 }
 
 // fetchRemoteImage downloads an image the caller named by URL, refusing

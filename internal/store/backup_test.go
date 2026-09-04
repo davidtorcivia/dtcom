@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,5 +125,48 @@ func TestSnapshotOverwrites(t *testing.T) {
 		if err := s.Snapshot(snap); err != nil {
 			t.Fatalf("Snapshot %d: %v", i, err)
 		}
+	}
+}
+
+func TestWebmentionsAffectFingerprintAndKeepModeration(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "live.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	before, err := s.ContentFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.QueueWebmention("https://source.example/post", "https://site.example/posts/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, err := s.ContentFingerprint()
+	if err != nil || queued == before {
+		t.Fatalf("queued Webmention fingerprint = %q, before = %q, err = %v", queued, before, err)
+	}
+	if err := s.VerifyWebmention(id, "verified", strings.Repeat("x", 600), ""); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.ModerateWebmention(id, "approved"); err != nil || !ok {
+		t.Fatalf("approve = %v, %v", ok, err)
+	}
+	approved, err := s.ContentFingerprint()
+	if err != nil || approved == queued {
+		t.Fatalf("approved Webmention fingerprint = %q, queued = %q, err = %v", approved, queued, err)
+	}
+	if _, err := s.QueueWebmention("https://source.example/post", "https://site.example/posts/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.VerifyWebmention(id, "rejected", "", "missing backlink"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.ListWebmentions(1)
+	if err != nil || len(items) != 1 || items[0].Status != "approved" {
+		t.Fatalf("resubmitted approved Webmention = %+v, %v", items, err)
+	}
+	if len([]rune(items[0].Title)) != 512 {
+		t.Fatalf("stored Webmention title has %d runes, want 512", len([]rune(items[0].Title)))
 	}
 }

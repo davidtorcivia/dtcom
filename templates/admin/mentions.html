@@ -1,0 +1,17 @@
+{{define "mentions"}}
+{{template "admin-header" .}}
+<main class="admin-main">
+<h2 class="admin-h2">Webmentions</h2>
+<p class="admin-lede">Incoming mentions are fetched from their source and enter this queue only after the source links back. Outgoing deliveries are shown for diagnosis.</p>
+{{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
+<table class="endpoint-table">
+<thead><tr><th>Direction</th><th>Status</th><th>Source</th><th>Target</th><th></th></tr></thead>
+<tbody>{{range .Items}}<tr id="mention-{{.ID}}">
+<td>{{.Direction}}</td><td>{{.Status}}</td><td><a href="{{.Source}}" target="_blank" rel="noopener">{{if .Title}}{{.Title}}{{else}}{{.Source}}{{end}}</a>{{with .Error}}<br><small>{{.}}</small>{{end}}</td>
+<td><a href="{{.Target}}" target="_blank" rel="noopener">{{.Target}}</a></td>
+<td>{{if and (eq .Direction "incoming") (eq .Status "verified")}}<form method="post" action="/admin/mentions/{{.ID}}/approved" class="admin-inline-form"><button class="admin-link-btn">approve</button></form> <form method="post" action="/admin/mentions/{{.ID}}/rejected" class="admin-inline-form"><button class="admin-link-btn">reject</button></form>{{end}}</td>
+</tr>{{else}}<tr><td colspan="5">No Webmentions yet.</td></tr>{{end}}</tbody>
+</table>
+</main>
+{{template "admin-footer" .}}
+{{end}}

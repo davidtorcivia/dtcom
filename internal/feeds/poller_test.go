@@ -11,6 +11,12 @@ import (
 	"davidtorcivia.com/dtcom/internal/store"
 )
 
+func newTestPoller(st *store.Store) *Poller {
+	p := NewPoller(st)
+	p.fp.Client = &http.Client{Timeout: perFeedTimeout}
+	return p
+}
+
 func TestPollFeedImportsItems(t *testing.T) {
 	// fake RSS server
 	rssXML := `<?xml version="1.0"?><rss version="2.0"><channel>
@@ -28,7 +34,7 @@ func TestPollFeedImportsItems(t *testing.T) {
 	}
 	defer st.Close()
 
-	poller := NewPoller(st)
+	poller := newTestPoller(st)
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: true}}}
 	n := poller.Poll(context.Background(), site)
 	if n != 1 {
@@ -57,7 +63,7 @@ func TestPollSkipsDisabledFeeds(t *testing.T) {
 	}
 	defer st.Close()
 
-	poller := NewPoller(st)
+	poller := newTestPoller(st)
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: false}}}
 	n := poller.Poll(context.Background(), site)
 	if n != 0 {
@@ -89,7 +95,7 @@ func TestPollOnPollCallback(t *testing.T) {
 	defer st.Close()
 
 	called := 0
-	poller := NewPoller(st)
+	poller := newTestPoller(st)
 	poller.OnPoll = func(n int) { called += n }
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{{URL: srv.URL, Label: "Sub", Enabled: true}}}
 	poller.Poll(context.Background(), site)
@@ -128,7 +134,7 @@ func TestPollContinuesPastDeadFeed(t *testing.T) {
 	}
 	defer st.Close()
 
-	poller := NewPoller(st)
+	poller := newTestPoller(st)
 	site := &siteconfig.Config{RSSFeeds: []siteconfig.RSSFeed{
 		{URL: dead.URL, Label: "Dead", Enabled: true},
 		{URL: live.URL, Label: "Live", Enabled: true},

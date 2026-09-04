@@ -26,6 +26,7 @@ type APIToken struct {
 	CreatedAt  int64
 	LastUsedAt int64
 	RevokedAt  int64
+	Scopes     string
 }
 
 // Active reports whether the token may still authenticate.
@@ -45,6 +46,10 @@ func hashToken(raw string) string {
 // CreateAPIToken mints a new token, stores its digest, and returns the raw
 // value. The raw value is returned once and never recoverable afterwards.
 func (s *Store) CreateAPIToken(name string) (string, *APIToken, error) {
+	return s.CreateScopedAPIToken(name, "read,drafts,publish,delete,ops")
+}
+
+func (s *Store) CreateScopedAPIToken(name, scopes string) (string, *APIToken, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "unnamed"
@@ -62,14 +67,14 @@ func (s *Store) CreateAPIToken(name string) (string, *APIToken, error) {
 
 	now := time.Now().Unix()
 	res, err := s.conn().Exec(
-		`INSERT INTO api_tokens(name, token_hash, prefix, created_at) VALUES(?,?,?,?)`,
-		name, hashToken(raw), raw[:8], now,
+		`INSERT INTO api_tokens(name, token_hash, prefix, created_at, scopes) VALUES(?,?,?,?,?)`,
+		name, hashToken(raw), raw[:8], now, scopes,
 	)
 	if err != nil {
 		return "", nil, fmt.Errorf("insert api token: %w", err)
 	}
 	id, _ := res.LastInsertId()
-	return raw, &APIToken{ID: id, Name: name, Prefix: raw[:8], CreatedAt: now}, nil
+	return raw, &APIToken{ID: id, Name: name, Prefix: raw[:8], CreatedAt: now, Scopes: scopes}, nil
 }
 
 // LookupAPIToken returns the active token matching raw, or ErrTokenNotFound.
@@ -79,10 +84,10 @@ func (s *Store) LookupAPIToken(raw string) (*APIToken, error) {
 	}
 	var t APIToken
 	err := s.conn().QueryRow(
-		`SELECT id, name, prefix, created_at, last_used_at, revoked_at
+		`SELECT id, name, prefix, created_at, last_used_at, revoked_at, scopes
 		 FROM api_tokens WHERE token_hash = ? AND revoked_at = 0`,
 		hashToken(raw),
-	).Scan(&t.ID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt, &t.RevokedAt)
+	).Scan(&t.ID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt, &t.RevokedAt, &t.Scopes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrTokenNotFound
 	}
@@ -103,7 +108,7 @@ func (s *Store) TouchAPIToken(id int64) error {
 // the admin page can show what was withdrawn and when.
 func (s *Store) ListAPITokens() ([]APIToken, error) {
 	rows, err := s.conn().Query(
-		`SELECT id, name, prefix, created_at, last_used_at, revoked_at
+		`SELECT id, name, prefix, created_at, last_used_at, revoked_at, scopes
 		 FROM api_tokens ORDER BY revoked_at = 0 DESC, created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list api tokens: %w", err)
@@ -112,7 +117,7 @@ func (s *Store) ListAPITokens() ([]APIToken, error) {
 	var out []APIToken
 	for rows.Next() {
 		var t APIToken
-		if err := rows.Scan(&t.ID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt, &t.RevokedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt, &t.RevokedAt, &t.Scopes); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

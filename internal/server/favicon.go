@@ -65,20 +65,10 @@ func (d *Deps) adminFaviconReset(w http.ResponseWriter, r *http.Request) {
 // loaded copy rather than to the live shared pointer, which would race the
 // engine's reads during Rebuild.
 func (d *Deps) setFavicon(url string) error {
-	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
-	if err != nil {
-		return err
-	}
-	site.Favicon = url
-	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
-		return err
-	}
-	if err := d.reloadSite(); err != nil {
-		return err
-	}
-	// The favicon link lives in every generated page's <head>, so the change
-	// is only visible once the site is rebuilt.
-	return d.Engine.Rebuild()
+	return d.mutateSite(func(site *siteconfig.Config) error {
+		site.Favicon = url
+		return nil
+	})
 }
 
 func faviconErrorMessage(err error) string {

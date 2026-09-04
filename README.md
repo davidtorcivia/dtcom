@@ -30,7 +30,7 @@ A single-binary website for a single author. Markdown files are the source of tr
 
 One process. One binary (pure Go, CGO disabled — `modernc.org/sqlite` provides the SQLite driver). The file watcher debounces changes under `content/` and rebuilds in the background, so dropping a markdown file in `content/posts/` is enough to publish it.
 
-A rebuild writes the new output first and prunes stale files afterwards, so every page stays readable while it runs — a rebuild fires on each RSS poll and each admin save, and the site must not blink out during them.
+A rebuild renders and indexes a complete generation, then switches every public route to it atomically. A template, content, or database failure leaves the last good generation online.
 
 ## Quickstart
 
@@ -42,9 +42,9 @@ docker compose up -d
 
 The site is now on `http://localhost:8080`. Put it behind Cloudflare Tunnel (or any reverse proxy) by pointing the tunnel at `localhost:8080`; nothing in dtcom terminates TLS itself. The compose file binds the published port to loopback for exactly that reason — set `DTCOM_BIND=0.0.0.0` if you really want it reachable directly.
 
-`GET /healthz` answers for a proxy or orchestrator health check.
+`GET /healthz` is the liveness probe. `GET /readyz` also checks the database and the last completed build.
 
-**Behind a proxy, set `DTCOM_TRUST_PROXY=true`** (the compose file defaults it on). Without it the server sees only the proxy's address, so every visitor shares one view-dedup bucket and one rate-limit bucket. With it set while the port is exposed directly, any client can forge `X-Forwarded-For` and evade both — so only turn it on when a proxy is genuinely in front.
+**Behind a proxy, set `DTCOM_TRUST_PROXY=true`.** It defaults off. Without it the server sees only the proxy's address, so every visitor shares one view-dedup bucket and one rate-limit bucket. With it set while the port is exposed directly, any client can forge `X-Forwarded-For` and evade both.
 
 The process refuses to start on a weak configuration: the password must be a bcrypt hash, the session key at least 32 characters, the API token at least 24, the TOTP secret valid base32, and the base URL an absolute http(s) URL.
 
@@ -61,12 +61,15 @@ date: 2026-07-27
 description: One line.
 tags: [essay, color]
 cover: /images/optional-social-preview.jpg
+updated: 2026-07-28T14:00:00Z
+publish_at: 2026-08-01T13:00:00Z
+agent: "Claim: … Entities: … Retrieval: …"
 ---
 
 Body text in markdown.
 ```
 
-The watcher rebuilds once writes settle (~500ms). Drafts (`draft: true`) are excluded from the build, and un-drafting or deleting a post removes its published pages on the next rebuild.
+The watcher rebuilds once writes settle (~500ms). Drafts (`draft: true`) are excluded. A future `publish_at` stays private until its timestamp, then publishes without a deploy. Every published post has its original `/posts/<slug>.md` plus `/posts/<slug>/agent.md`, a compact facts/entities/claims representation for agents. Agent-authored posts should provide `agent`; older posts fall back to their description.
 
 Beyond GFM, a post body gets footnotes (`[^1]`), `==highlight==`, syntax-highlighted code fences, LaTeX math (`$inline$` and `$$display$$`, typeset by KaTeX, loaded only on pages that have some), and figures:
 
@@ -85,7 +88,9 @@ An image with more resolution than the column shows becomes clickable and opens 
 
 Tag a pair of URLs `#light` and `#dark` and they collapse into a single figure that swaps with the theme. The swap is CSS keyed on `data-theme`, not a `<picture>` element with `prefers-color-scheme`: that media query follows the operating system only, so it would ignore the toggle in the site header. Both files are in the markup and the browser fetches both, which is the cost of honouring a manual toggle.
 
-**Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has an Obsidian-style Write/Preview toggle, and takes images by button, paste, or drag-and-drop; each raster upload is re-encoded (which strips EXIF), downscaled to 2560px, stored under a content-derived name, and cut into the renditions described above. An upload that carries transparency is kept lossless whatever it arrived as — the decoded pixels decide that, not the file extension. SVG is accepted too and stored as written — there is nothing to resample in a vector — after being validated as a real SVG document.
+**Admin UI.** `/admin` — log in with the bcrypt password and a TOTP code. The post editor has Write/Preview, scheduling, an AGENT field, and a signed seven-day preview link for private or scheduled work. It takes images by button, paste, or drag-and-drop; `/admin/media` lists dimensions and usage, copies URLs, and deletes only unused assets. Raster uploads are re-encoded (stripping EXIF), downscaled to 2560px, stored under a content-derived name, and cut into the renditions described above. SVG is validated and served under a sandboxed policy.
+
+**Publishing activity.** `/admin/activity` records the actor, exact before/after source, and revision for every article mutation. Undo is one click and refuses to run if anything changed afterward, so it cannot clobber newer work.
 
 **Dashboard.** `/admin` — views over time, and what got read. Both panels take a range (7 days, 30, 90, 12 months, all time) and the two are independent, so you can hold a year of traffic beside last week's most-read list. The chart draws one bar per day up to about three months and switches to one per month past that; hovering a bar names the day and its count. Every day in the window gets a column, including the ones nobody visited — grouping in SQL returns only the days that have a row, which made a month with five busy days render as five bars side by side and read as a steady week.
 
@@ -140,7 +145,7 @@ Each panel carries its own range selector, so a week of referrers can sit beside
 Two kinds of bearer credential authenticate the REST API and MCP server, and both are accepted everywhere:
 
 - **The bootstrap token**, `DTCOM_API_TOKEN` from the environment. It cannot be revoked from the admin UI on purpose — it is the way back in if a managed token is withdrawn by mistake. Rotate it by changing the variable and restarting.
-- **Managed tokens**, minted on `/admin/integrations`. Give each client its own — an MCP config, a script, a phone shortcut — so one can be revoked without disturbing the others. Only a SHA-256 digest is stored, so a copy of the database yields no usable credentials, and a token's value is shown exactly once, at creation. The admin page lists each token's name, prefix, creation date, and last use.
+- **Managed tokens**, minted on `/admin/integrations`. Give each agent only the scopes it needs: `read`, `drafts`, `publish`, `delete`, and `ops`. The safe default is read plus draft writing, with no ability to publish, delete, run rebuilds, or poll remote feeds. Only a SHA-256 digest is stored and the raw value is shown once.
 
 ## MCP integration
 
@@ -159,20 +164,21 @@ The `/mcp` endpoint speaks MCP over Streamable HTTP with bearer-token auth (the 
 
 For Claude Desktop, drop that block into `claude_desktop_config.json`. The transport is HTTP, not stdio — there is no `command`.
 
-Seventeen tools are exposed, grouped by what they touch:
+Tools are grouped by what they touch:
 
 | Group | Tools |
 | ------- | ------- |
-| Articles | `list_articles`, `get_article`, `create_article`, `update_article`, `delete_article`, `search_articles` |
+| Articles | `list_articles`, `get_article`, `create_article`, `update_article`, `patch_article`, `delete_article`, `search_articles` |
+| Images | `list_images`, `add_image` |
 | Links | `list_links`, `add_link`, `remove_link` |
 | Site | `get_site`, `update_bio`, `update_nav`, `update_social`, `update_rss_feeds` |
 | Ops | `regenerate`, `get_stats`, `refresh_feeds` |
 
 `/admin/integrations` renders the config block above with your actual URL and a token, ready to copy.
 
-Every write tool saves to disk and triggers a rebuild, so a `create_article` call is fully published by the time it returns. `update_article` distinguishes an omitted field from an empty one — omit a key to keep it, pass `""` to clear it.
+Every write saves atomically and rebuilds before returning. Drafts and scheduled posts remain private. Updates, patches, and deletes require the revision returned by `get_article`; a stale agent gets a conflict instead of overwriting newer work. `update_article` distinguishes an omitted field from an empty one.
 
-**Each tool says what it does to the site.** Six are marked read-only, two destructive (`delete_article`, `remove_link`), the rest as writes that take nothing away — with idempotency where it holds, so a client knows that replacing the bio twice is the same as replacing it once and that adding a post twice is not. `refresh_feeds` is the only one that contacts anybody else's server. These are the hints a client consults before deciding whether to ask you first, and they have to be stated: `destructiveHint` and `openWorldHint` both default to *true*, so a server that says nothing is claiming every tool might wreck something.
+**Each tool says what it does to the site.** Read, write, destructive, idempotent, and open-world annotations let a client ask before risky work. `refresh_feeds` and remote `add_image` calls contact another server; both use a transport that refuses loopback, private, link-local, and cloud-metadata addresses.
 
 **Answers are structured.** Every tool publishes an output schema and returns `structuredContent` validated against it, with the same JSON in a text block for older clients. So a client gets `{"slug": "…", "status": "created"}` as data, not as prose to be parsed.
 
@@ -203,7 +209,7 @@ Two endpoints are public and unauthenticated: `GET /api/search?q=` and `POST /ap
 
 ## RSS
 
-Outbound: the site serves `/feed.xml` with the most recent published posts.
+Outbound: `/feed.xml` includes the rendered article body, categories, stable timestamps, and up to 50 recent published posts, so a reader can consume the post without opening a browser.
 
 Inbound: each `rss_feeds` entry in `content/site.yml` is polled on `DTCOM_RSS_INTERVAL` (default 30m, minimum 1m). New items land in the links table and appear on `/links`. Subscribe from the admin Links page — paste a feed URL, and it is polled immediately and then on the interval. Feeds can be paused or removed there too.
 
@@ -211,12 +217,16 @@ The poller dedupes by URL, so re-running it is safe, and one dead feed never blo
 
 Removing a feed leaves its already-imported links in place; they are part of the published archive.
 
+## Webmentions
+
+Every public page advertises `POST /webmention`. Incoming submissions are size/rate limited, restricted to real published targets, fetched through the public-address-only transport, and accepted into `/admin/mentions` only after the source is verified to link back. The author can approve or reject verified mentions there. Published posts are scanned hourly for external links; endpoints are discovered from HTTP `Link` headers or HTML and notified once, with transient failures retried.
+
 ## Security posture
 
 Worth knowing before this faces the internet:
 
 - **Admin**: password (bcrypt) + TOTP, HMAC-signed session cookie, `SameSite=Lax` plus a `Sec-Fetch-Site`/`Origin` check on every write. A TOTP code is accepted once — it cannot be replayed inside its 30-second window. Login is rate limited per IP and globally, since bcrypt is expensive and a six-digit code is guessable.
-- **API/MCP**: constant-time comparison for the bootstrap token, hashed lookup for managed ones; failed attempts are rate limited per IP. Managed tokens are stored as digests, never in the clear.
+- **API/MCP**: constant-time comparison for the bootstrap token, hashed lookup and least-privilege scopes for managed ones; failed attempts are rate limited per IP. Article revisions prevent lost updates, successful changes are audited, and a failed rebuild restores the source file.
 - **Destructive actions** in the admin are behind a styled confirmation dialog. It is a real `<dialog>` driven from `admin.js` rather than an inline `onsubmit="return confirm(...)"` — the CSP forbids inline handlers, so an inline confirm would not run at all and the delete would go straight through.
 - **Headers**: `Content-Security-Policy` with a strict `script-src` (no page executes an inline script), `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Strict-Transport-Security` on https deployments (the proxy in front does not add it for you). Every source is `'self'` apart from `img-src`, which allows `https:` so posts can reference remote images. Typography is self-hosted from `static/fonts/`, so there are no third-party font hosts to allow.
 - **Markdown** renders with raw HTML enabled, because posts are author-written. Everything downstream treats rendered output as untrusted anyway: the search index strips tags, and search excerpts are escaped before their highlight markers are restored.
@@ -263,6 +273,7 @@ internal/
   server/     HTTP: public routes, admin UI, REST API (/api/v1), MCP (/mcp)
   store/      SQLite layer: articles (FTS5), links, views
   feeds/      outbound feed rendering + inbound RSS poller
+  webmention/ Webmention verification, discovery, and delivery
   watcher/    fsnotify wrapper with debounce
   auth/       password+TOTP login, HMAC session cookies
   assets/     content-hashed static asset URLs
