@@ -18,7 +18,7 @@ func TestOGCardIsReusedAndPrunedWithItsPost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ogDir := filepath.Join(te.publicDir, "og")
+	ogDir := filepath.Join(te.engine.PublicDir(), "og")
 	first := ogFiles(t, ogDir)
 	if len(first) == 0 {
 		t.Fatal("no og cards were generated")
@@ -33,6 +33,7 @@ func TestOGCardIsReusedAndPrunedWithItsPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	ogDir = filepath.Join(te.engine.PublicDir(), "og")
 	again := ogFiles(t, ogDir)
 	if strings.Join(again, ",") != strings.Join(first, ",") {
 		t.Errorf("card set changed on a no-op rebuild:\n%v\n%v", first, again)
@@ -53,6 +54,7 @@ func TestOGCardIsReusedAndPrunedWithItsPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	ogDir = filepath.Join(te.engine.PublicDir(), "og")
 	after := ogFiles(t, ogDir)
 	if strings.Join(after, ",") == strings.Join(first, ",") {
 		t.Error("retitling the post did not change its card")

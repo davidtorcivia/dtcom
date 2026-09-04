@@ -186,7 +186,7 @@ func (s *Store) ReplaceWith(path string) error {
 	s.db = db
 	// Idempotent, and the copyFile path above installs bytes this process has
 	// not migrated in place.
-	if _, err := s.db.Exec(schema); err != nil {
+	if err := migrateDB(s.db); err != nil {
 		return fmt.Errorf("migrate after replace: %w", err)
 	}
 	return nil
@@ -205,7 +205,7 @@ func verifyDatabase(path string) error {
 		return err
 	}
 	defer db.Close()
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrateDB(db); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil

@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 
 	"davidtorcivia.com/dtcom/internal/build"
 	"davidtorcivia.com/dtcom/internal/store"
+	"gopkg.in/yaml.v3"
 )
 
 // dateRe matches a strict YYYY-MM-DD literal. Used to validate caller-supplied
@@ -37,106 +40,99 @@ func validDate(s string) bool {
 // The public /api/search and /api/track endpoints (no auth) are registered
 // separately in registerPublic.
 func registerAPI(mux *http.ServeMux, d *Deps) {
-	mux.Handle("/api/v1/", d.apiMiddleware(http.HandlerFunc(d.apiRouter)))
+	route := func(pattern, scope string, fn http.HandlerFunc) {
+		mux.Handle(pattern, d.apiMiddleware(scope, fn))
+	}
+	route("GET /api/v1/articles", scopeRead, d.apiListArticles)
+	route("POST /api/v1/articles", scopeDrafts, d.apiCreateArticle)
+	route("GET /api/v1/articles/{slug}", scopeRead, d.apiGetArticle)
+	route("PUT /api/v1/articles/{slug}", scopeDrafts, d.apiUpdateArticle)
+	route("DELETE /api/v1/articles/{slug}", scopeDelete, d.apiDeleteArticle)
+	route("GET /api/v1/links", scopeRead, d.apiListLinks)
+	route("POST /api/v1/links", scopePublish, d.apiAddLink)
+	route("DELETE /api/v1/links/{id}", scopeDelete, d.apiDeleteLink)
+	route("GET /api/v1/site", scopeRead, func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, http.StatusOK, d.Site()) })
+	route("PUT /api/v1/site/{section}", scopePublish, d.apiUpdateSiteSection)
+	route("POST /api/v1/regenerate", scopeOps, d.apiRegenerate)
+	route("GET /api/v1/stats", scopeRead, d.apiStats)
+	route("POST /api/v1/feeds/refresh", scopeOps, d.apiRefreshFeeds)
+	route("POST /api/v1/images", scopeDrafts, d.apiUploadImage)
 }
 
 // apiMiddleware enforces the bearer token for every /api/v1/ request and
 // throttles repeated failures so the token can't be guessed at line rate.
-func (d *Deps) apiMiddleware(next http.Handler) http.Handler {
+func (d *Deps) apiMiddleware(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !d.authorizeBearer(w, r) {
+		p, ok := d.authorizeBearer(w, r)
+		if !ok {
+			return
+		}
+		if !p.allows(scope) {
+			writeError(w, http.StatusForbidden, nil)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, p)))
 	})
 }
 
 // authorizeBearer checks the API token, writing the failure response itself.
 // Rate limiting keys on the client address and only charges a token on a
 // failed attempt, so a correctly-authenticated client is never throttled.
-func (d *Deps) authorizeBearer(w http.ResponseWriter, r *http.Request) bool {
-	if d.authorizeToken(r) {
-		return true
+func (d *Deps) authorizeBearer(w http.ResponseWriter, r *http.Request) (*principal, bool) {
+	if p, ok := d.authorizeToken(r); ok {
+		return p, true
 	}
 	ip := d.clientIP(r)
 	if !d.limits.bearer.Allow(ip) {
 		w.Header().Set("Retry-After", "10")
 		writeError(w, http.StatusTooManyRequests, nil)
-		return false
+		return nil, false
 	}
 	slog.Warn("bearer auth failed", "ip", ip, "path", r.URL.Path)
 	w.Header().Set("WWW-Authenticate", `Bearer realm="dtcom"`)
 	writeError(w, http.StatusUnauthorized, nil)
-	return false
+	return nil, false
 }
 
-// apiRouter dispatches a single /api/v1/ prefix by exact path + method. The
-// prefix match on the wrapping mux.Handle guarantees we only see API traffic.
-func (d *Deps) apiRouter(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Path
-	m := r.Method
-	switch {
-	// articles
-	case p == "/api/v1/articles" && m == http.MethodGet:
-		d.apiListArticles(w, r)
-	case p == "/api/v1/articles" && m == http.MethodPost:
-		d.apiCreateArticle(w, r)
-	case strings.HasPrefix(p, "/api/v1/articles/") && m == http.MethodGet:
-		d.apiGetArticle(w, r)
-	case strings.HasPrefix(p, "/api/v1/articles/") && m == http.MethodPut:
-		d.apiUpdateArticle(w, r)
-	case strings.HasPrefix(p, "/api/v1/articles/") && m == http.MethodDelete:
-		d.apiDeleteArticle(w, r)
-	// links
-	case p == "/api/v1/links" && m == http.MethodGet:
-		d.apiListLinks(w, r)
-	case p == "/api/v1/links" && m == http.MethodPost:
-		d.apiAddLink(w, r)
-	case strings.HasPrefix(p, "/api/v1/links/") && m == http.MethodDelete:
-		d.apiDeleteLink(w, r)
-	// site config
-	case p == "/api/v1/site" && m == http.MethodGet:
-		writeJSON(w, http.StatusOK, d.Site())
-	case strings.HasPrefix(p, "/api/v1/site/") && m == http.MethodPut:
-		d.apiUpdateSiteSection(w, r)
-	// ops
-	case p == "/api/v1/regenerate" && m == http.MethodPost:
-		if err := d.Engine.Rebuild(); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	case p == "/api/v1/stats" && m == http.MethodGet:
-		s, err := d.Store.Stats()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, s)
-	case p == "/api/v1/feeds/refresh" && m == http.MethodPost:
-		// Cancellation detached: a browser hang-up mid-poll must not
-		// abort a half-finished feed import.
-		n := d.Poller.Poll(context.WithoutCancel(r.Context()), d.Site())
-		writeJSON(w, http.StatusOK, map[string]int{"imported": n})
-	// images
-	case p == "/api/v1/images" && m == http.MethodPost:
-		d.apiUploadImage(w, r)
-	default:
-		writeError(w, http.StatusNotFound, nil)
+func (d *Deps) apiRegenerate(w http.ResponseWriter, _ *http.Request) {
+	if err := d.Engine.Rebuild(); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (d *Deps) apiStats(w http.ResponseWriter, _ *http.Request) {
+	s, err := d.Store.Stats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (d *Deps) apiRefreshFeeds(w http.ResponseWriter, r *http.Request) {
+	n := d.Poller.Poll(context.WithoutCancel(r.Context()), d.Site())
+	writeJSON(w, http.StatusOK, map[string]int{"imported": n})
 }
 
 // articleInput is the JSON shape for create/update article payloads. It's
 // shared by the REST API and the MCP tools.
 type articleInput struct {
-	Title       string   `json:"title"`
-	Slug        string   `json:"slug"`
-	Date        string   `json:"date"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags"`
-	Body        string   `json:"body"`
-	Draft       bool     `json:"draft"`
+	Title            string   `json:"title"`
+	Slug             string   `json:"slug"`
+	Date             string   `json:"date"`
+	Description      string   `json:"description"`
+	Tags             []string `json:"tags"`
+	Body             string   `json:"body"`
+	Cover            string   `json:"cover"`
+	Draft            bool     `json:"draft"`
+	Agent            string   `json:"agent"`
+	PublishAt        string   `json:"publish_at"`
+	ExpectedRevision string   `json:"expected_revision"`
+	Updated          string   `json:"-"`
+	Actor            string   `json:"-"`
 }
 
 // linkInput is the JSON shape for add-link payloads.
@@ -159,9 +155,13 @@ type linkInput struct {
 // both say "and description" — and neither actually sent it. Now that the tool
 // publishes an output schema, that gap would be advertised.
 type articleSummary struct {
-	Slug, Title, Date string
-	Description       string
-	Draft             bool
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Date        string `json:"date"`
+	Description string `json:"description"`
+	Draft       bool   `json:"draft"`
+	PublishAt   string `json:"publish_at,omitempty"`
+	Revision    string `json:"revision"`
 }
 
 func (d *Deps) apiListArticles(w http.ResponseWriter, r *http.Request) {
@@ -174,14 +174,14 @@ func (d *Deps) apiListArticles(w http.ResponseWriter, r *http.Request) {
 	for _, a := range arts {
 		res = append(res, articleSummary{
 			Slug: a.Slug, Title: a.Title, Date: a.Date.Format("2006-01-02"),
-			Description: a.Description, Draft: a.Draft,
+			Description: a.Description, Draft: a.Draft, PublishAt: formatOptionalTime(a.PublishAt), Revision: a.Revision,
 		})
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
 func (d *Deps) apiGetArticle(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/api/v1/articles/")
+	slug := r.PathValue("slug")
 	a, err := d.findArticleBySlug(slug)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -191,6 +191,7 @@ func (d *Deps) apiGetArticle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, nil)
 		return
 	}
+	w.Header().Set("ETag", `"`+a.Revision+`"`)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"slug":        a.Slug,
 		"title":       a.Title,
@@ -199,6 +200,10 @@ func (d *Deps) apiGetArticle(w http.ResponseWriter, r *http.Request) {
 		"tags":        a.Tags,
 		"draft":       a.Draft,
 		"body":        a.Body,
+		"agent":       a.Agent,
+		"publish_at":  formatOptionalTime(a.PublishAt),
+		"updated":     formatOptionalTime(a.Updated),
+		"revision":    a.Revision,
 	})
 }
 
@@ -208,20 +213,46 @@ func (d *Deps) apiCreateArticle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if !in.Draft && requireScope(r.Context(), scopePublish) != nil {
+		writeError(w, http.StatusForbidden, nil)
+		return
+	}
+	in.Actor = actorFromContext(r.Context())
 	slug, status, err := d.createArticle(in)
 	if err != nil {
 		writeError(w, status, err)
 		return
 	}
 	w.Header().Set("Location", "/api/v1/articles/"+slug)
-	writeJSON(w, http.StatusCreated, map[string]string{"slug": slug})
+	revision := d.currentArticleRevision(slug)
+	if revision != "" {
+		w.Header().Set("ETag", `"`+revision+`"`)
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"slug": slug, "revision": revision})
 }
 
 func (d *Deps) apiUpdateArticle(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/api/v1/articles/")
+	slug := r.PathValue("slug")
 	var in articleInput
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	current, err := d.findArticleBySlug(slug)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if (!in.Draft || current != nil && !current.Draft) && requireScope(r.Context(), scopePublish) != nil {
+		writeError(w, http.StatusForbidden, nil)
+		return
+	}
+	in.Actor = actorFromContext(r.Context())
+	if in.ExpectedRevision == "" {
+		in.ExpectedRevision = strings.Trim(r.Header.Get("If-Match"), `"`)
+	}
+	if in.ExpectedRevision == "" {
+		writeError(w, http.StatusPreconditionRequired, nil)
 		return
 	}
 	status, err := d.updateArticle(slug, in)
@@ -229,12 +260,21 @@ func (d *Deps) apiUpdateArticle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"slug": slug})
+	revision := d.currentArticleRevision(slug)
+	if revision != "" {
+		w.Header().Set("ETag", `"`+revision+`"`)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "revision": revision})
 }
 
 func (d *Deps) apiDeleteArticle(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/api/v1/articles/")
-	status, err := d.deleteArticle(slug)
+	slug := r.PathValue("slug")
+	expected := strings.Trim(r.Header.Get("If-Match"), `"`)
+	if expected == "" {
+		writeError(w, http.StatusPreconditionRequired, nil)
+		return
+	}
+	status, err := d.deleteArticleRevision(slug, actorFromContext(r.Context()), expected)
 	if err != nil {
 		writeError(w, status, err)
 		return
@@ -264,6 +304,14 @@ func (d *Deps) findArticleBySlug(slug string) (*build.Article, error) {
 	return nil, nil
 }
 
+func (d *Deps) currentArticleRevision(slug string) string {
+	a, _ := d.findArticleBySlug(slug)
+	if a == nil {
+		return ""
+	}
+	return a.Revision
+}
+
 // createArticle writes a new post file and rebuilds. Returns
 // (slug, httpStatus, err) where status is 409 on a filename collision.
 func (d *Deps) createArticle(in articleInput) (string, int, error) {
@@ -287,6 +335,11 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 	if !validDate(date) {
 		return "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
+	if in.PublishAt != "" {
+		if _, err := time.Parse(time.RFC3339, in.PublishAt); err != nil {
+			return "", http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
+		}
+	}
 	// A slug collision must be detected against every existing post, not just
 	// the <date>-<slug>.md filename: two posts with the same slug but
 	// different dates would silently overwrite each other's rendered page.
@@ -298,12 +351,16 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 		return "", http.StatusConflict, fmt.Errorf("article %q already exists", slug)
 	}
 	path := filepath.Join(d.postsDir(), date+"-"+slug+".md")
-	if err := writeFileAtomic(path, []byte(renderArticleFile(in, date, slug))); err != nil {
+	after := []byte(renderArticleFile(in, date))
+	if err := writeFileAtomic(path, after); err != nil {
 		return "", http.StatusInternalServerError, err
 	}
 	if err := d.Engine.Rebuild(); err != nil {
+		_ = os.Remove(path)
 		return "", http.StatusInternalServerError, err
 	}
+	d.recordArticleAudit(store.ArticleAudit{Actor: mutationActor(in.Actor), Action: "create", Slug: slug,
+		SourceName: filepath.Base(path), AfterRevision: revisionOf(after), AfterSource: after})
 	return slug, http.StatusCreated, nil
 }
 
@@ -353,6 +410,9 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	if a == nil {
 		return http.StatusNotFound, fmt.Errorf("article %q not found", slug)
 	}
+	if in.ExpectedRevision != "" && in.ExpectedRevision != a.Revision {
+		return http.StatusConflict, fmt.Errorf("article changed: expected revision %s, current revision %s", in.ExpectedRevision, a.Revision)
+	}
 	date := in.Date
 	if date == "" {
 		date = a.Date.Format("2006-01-02")
@@ -363,25 +423,52 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	if strings.TrimSpace(in.Title) == "" {
 		return http.StatusBadRequest, fmt.Errorf("title is required")
 	}
-	if err := writeFileAtomic(a.SourcePath, []byte(renderArticleFile(in, date, slug))); err != nil {
+	if in.PublishAt != "" {
+		if _, err := time.Parse(time.RFC3339, in.PublishAt); err != nil {
+			return http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
+		}
+	}
+	before, err := os.ReadFile(a.SourcePath)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	in.Updated = time.Now().UTC().Format(time.RFC3339)
+	after := []byte(renderArticleFile(in, date))
+	if err := writeFileAtomic(a.SourcePath, after); err != nil {
 		return http.StatusInternalServerError, err
 	}
 	// Keep the filename's date prefix in step with the frontmatter date, so
 	// content/posts stays sorted and self-describing after a date edit. The
 	// slug (everything after the prefix) is unchanged, so no URL moves.
+	finalPath := a.SourcePath
 	if want := filepath.Join(filepath.Dir(a.SourcePath), date+"-"+slug+".md"); want != a.SourcePath {
 		if err := os.Rename(a.SourcePath, want); err != nil {
 			slog.Warn("could not rename post file after date change", "from", a.SourcePath, "to", want, "err", err)
+		} else {
+			finalPath = want
 		}
 	}
 	if err := d.Engine.Rebuild(); err != nil {
+		_ = os.Remove(finalPath)
+		_ = writeFileAtomic(a.SourcePath, before)
 		return http.StatusInternalServerError, err
 	}
+	d.recordArticleAudit(store.ArticleAudit{Actor: mutationActor(in.Actor), Action: "update", Slug: slug,
+		SourceName: filepath.Base(a.SourcePath), BeforeRevision: a.Revision, AfterRevision: revisionOf(after),
+		BeforeSource: before, AfterSource: after})
 	return http.StatusOK, nil
 }
 
 // deleteArticle removes the post file matching slug and rebuilds.
 func (d *Deps) deleteArticle(slug string) (int, error) {
+	return d.deleteArticleAs(slug, "admin")
+}
+
+func (d *Deps) deleteArticleAs(slug, actor string) (int, error) {
+	return d.deleteArticleRevision(slug, actor, "")
+}
+
+func (d *Deps) deleteArticleRevision(slug, actor, expected string) (int, error) {
 	d.postMu.Lock()
 	defer d.postMu.Unlock()
 	a, err := d.findArticleBySlug(slug)
@@ -391,12 +478,22 @@ func (d *Deps) deleteArticle(slug string) (int, error) {
 	if a == nil {
 		return http.StatusNotFound, fmt.Errorf("article %q not found", slug)
 	}
+	if expected != "" && expected != a.Revision {
+		return http.StatusConflict, fmt.Errorf("article changed: expected revision %s, current revision %s", expected, a.Revision)
+	}
+	before, err := os.ReadFile(a.SourcePath)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
 	if err := os.Remove(a.SourcePath); err != nil {
 		return http.StatusInternalServerError, err
 	}
 	if err := d.Engine.Rebuild(); err != nil {
+		_ = writeFileAtomic(a.SourcePath, before)
 		return http.StatusInternalServerError, err
 	}
+	d.recordArticleAudit(store.ArticleAudit{Actor: mutationActor(actor), Action: "delete", Slug: slug,
+		SourceName: filepath.Base(a.SourcePath), BeforeRevision: a.Revision, BeforeSource: before})
 	return http.StatusNoContent, nil
 }
 
@@ -453,7 +550,7 @@ func (d *Deps) apiAddLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) apiDeleteLink(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/links/")
+	idStr := r.PathValue("id")
 	// Sscanf("12abc", "%d") succeeds and leaves the trailing junk unread, so
 	// parse strictly instead.
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -490,7 +587,7 @@ func (d *Deps) apiUpdateSiteSection(w http.ResponseWriter, r *http.Request) {
 	// Same cap as every other JSON endpoint; decodeJSONReader itself is also
 	// used with already-bounded readers (the MCP tools).
 	r.Body = http.MaxBytesReader(nil, r.Body, maxJSONBody)
-	section := strings.TrimPrefix(r.URL.Path, "/api/v1/site/")
+	section := r.PathValue("section")
 	if err := d.updateSiteSection(section, r.Body); err != nil {
 		writeError(w, httpToStatus(err), err)
 		return
@@ -502,26 +599,31 @@ func (d *Deps) apiUpdateSiteSection(w http.ResponseWriter, r *http.Request) {
 // Article file rendering + slugify (shared with admin handlers and MCP)
 // ---------------------------------------------------------------------------
 
-// renderArticleFile assembles a YAML-frontmatter + markdown body for writing a
-// post file. Every string is double-quoted with escaping so a title containing
-// a colon or quote can't corrupt the frontmatter.
-func renderArticleFile(in articleInput, date, slug string) string {
-	var sb strings.Builder
-	sb.WriteString("---\n")
-	sb.WriteString("title: " + yamlQuote(in.Title) + "\n")
-	sb.WriteString("date: " + date + "\n")
-	sb.WriteString("description: " + yamlQuote(in.Description) + "\n")
-	// Each tag is quoted individually: an unquoted tag containing a comma or a
-	// bracket would silently split or terminate the flow sequence, corrupting
-	// every subsequent field.
-	quoted := make([]string, 0, len(in.Tags))
+// renderArticleFile assembles YAML frontmatter and a markdown body. yaml.v3
+// handles quoting so punctuation in an agent-written field cannot corrupt it.
+func renderArticleFile(in articleInput, date string) string {
+	tags := make([]string, 0, len(in.Tags))
 	for _, t := range in.Tags {
 		if t = strings.TrimSpace(t); t != "" {
-			quoted = append(quoted, yamlQuote(t))
+			tags = append(tags, t)
 		}
 	}
-	fmt.Fprintf(&sb, "tags: [%s]\n", strings.Join(quoted, ", "))
-	sb.WriteString("draft: " + boolStr(in.Draft) + "\n")
+	front := struct {
+		Title       string   `yaml:"title"`
+		Date        yamlDate `yaml:"date"`
+		Description string   `yaml:"description"`
+		Tags        []string `yaml:"tags"`
+		Cover       string   `yaml:"cover,omitempty"`
+		Draft       bool     `yaml:"draft"`
+		Updated     string   `yaml:"updated,omitempty"`
+		PublishAt   string   `yaml:"publish_at,omitempty"`
+		Agent       string   `yaml:"agent,omitempty"`
+	}{Title: in.Title, Date: yamlDate(date), Description: in.Description, Tags: tags, Cover: in.Cover, Draft: in.Draft,
+		Updated: in.Updated, PublishAt: in.PublishAt, Agent: in.Agent}
+	b, _ := yaml.Marshal(front)
+	var sb strings.Builder
+	sb.WriteString("---\n")
+	sb.Write(b)
 	sb.WriteString("---\n\n")
 	body := normalizeNewlines(in.Body)
 	sb.WriteString(body)
@@ -531,35 +633,10 @@ func renderArticleFile(in articleInput, date, slug string) string {
 	return sb.String()
 }
 
-// yamlQuote renders s as a YAML double-quoted scalar. Backslash and quote are
-// escaped, and the control characters a browser textarea can smuggle in
-// (newline, tab, CR) are emitted as escapes rather than raw bytes, which would
-// otherwise break the single-line key: value form.
-func yamlQuote(s string) string {
-	var b strings.Builder
-	b.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\x%02x`, r)
-				continue
-			}
-			b.WriteRune(r)
-		}
-	}
-	b.WriteByte('"')
-	return b.String()
+type yamlDate string
+
+func (d yamlDate) MarshalYAML() (any, error) {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!timestamp", Value: string(d)}, nil
 }
 
 // normalizeNewlines converts the CRLF a browser form submits into the LF the
@@ -568,11 +645,31 @@ func normalizeNewlines(s string) string {
 	return strings.ReplaceAll(s, "\r\n", "\n")
 }
 
-func boolStr(b bool) string {
-	if b {
-		return "true"
+func formatOptionalTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
 	}
-	return "false"
+	return t.UTC().Format(time.RFC3339)
+}
+
+func revisionOf(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func mutationActor(actor string) string {
+	if strings.TrimSpace(actor) == "" {
+		return "admin"
+	}
+	return actor
+}
+
+func (d *Deps) recordArticleAudit(a store.ArticleAudit) {
+	if d.Store != nil {
+		if err := d.Store.RecordArticleAudit(a); err != nil {
+			slog.Error("record article audit", "slug", a.Slug, "action", a.Action, "err", err)
+		}
+	}
 }
 
 // slugify lowercases s, separates on spaces/underscores, and drops every

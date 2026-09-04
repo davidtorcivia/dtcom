@@ -163,7 +163,8 @@ func TestMCPUpdateArticleOmittedVsEmpty(t *testing.T) {
 	call(1, "create_article", `{"title":"Held Note","body":"body text","description":"a summary","tags":["one"]}`)
 
 	// Omitting description leaves it alone.
-	call(2, "update_article", `{"slug":"held-note","title":"Held Note Revised"}`)
+	revision := articleRevision(t, d, "held-note")
+	call(2, "update_article", `{"slug":"held-note","title":"Held Note Revised","expected_revision":"`+revision+`"}`)
 	got := call(3, "get_article", `{"slug":"held-note"}`).Body.String()
 	if !containsStr(got, "a summary") {
 		t.Errorf("omitted description was not preserved; body:\n%s", got)
@@ -173,7 +174,8 @@ func TestMCPUpdateArticleOmittedVsEmpty(t *testing.T) {
 	}
 
 	// Sending it empty clears it, and an empty tag list empties the tags.
-	call(4, "update_article", `{"slug":"held-note","description":"","tags":[]}`)
+	revision = articleRevision(t, d, "held-note")
+	call(4, "update_article", `{"slug":"held-note","description":"","tags":[],"expected_revision":"`+revision+`"}`)
 	got = call(5, "get_article", `{"slug":"held-note"}`).Body.String()
 	if containsStr(got, "a summary") {
 		t.Errorf("explicit empty description did not clear it; body:\n%s", got)
@@ -205,9 +207,10 @@ func TestMCPPatchArticleRequiresUniqueMatch(t *testing.T) {
 	}
 
 	call(1, "create_article", `{"title":"Patch Me","body":"alpha beta\n\nalpha gamma"}`)
+	revision := articleRevision(t, d, "patch-me")
 
 	// Two occurrences with no all flag: refused, and nothing written.
-	got := call(2, "patch_article", `{"slug":"patch-me","find":"alpha","replace":"delta"}`).Body.String()
+	got := call(2, "patch_article", `{"slug":"patch-me","find":"alpha","replace":"delta","expected_revision":"`+revision+`"}`).Body.String()
 	if !containsStr(got, "appears 2 times") {
 		t.Errorf("ambiguous find was not refused; body:\n%s", got)
 	}
@@ -216,14 +219,15 @@ func TestMCPPatchArticleRequiresUniqueMatch(t *testing.T) {
 	}
 
 	// A find that pins one of them replaces just that one.
-	call(4, "patch_article", `{"slug":"patch-me","find":"alpha beta","replace":"delta beta"}`)
+	call(4, "patch_article", `{"slug":"patch-me","find":"alpha beta","replace":"delta beta","expected_revision":"`+revision+`"}`)
 	got = call(5, "get_article", `{"slug":"patch-me"}`).Body.String()
 	if !containsStr(got, "delta beta") || !containsStr(got, "alpha gamma") {
 		t.Errorf("unique patch did not land cleanly; body:\n%s", got)
 	}
 
 	// A find that is not there at all is an error, not a silent no-op.
-	got = call(6, "patch_article", `{"slug":"patch-me","find":"nowhere","replace":"x"}`).Body.String()
+	revision = articleRevision(t, d, "patch-me")
+	got = call(6, "patch_article", `{"slug":"patch-me","find":"nowhere","replace":"x","expected_revision":"`+revision+`"}`).Body.String()
 	if !containsStr(got, "does not appear") {
 		t.Errorf("missing find was not reported; body:\n%s", got)
 	}
@@ -231,6 +235,15 @@ func TestMCPPatchArticleRequiresUniqueMatch(t *testing.T) {
 
 func containsStr(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
+}
+
+func articleRevision(t *testing.T, d *testDeps, slug string) string {
+	t.Helper()
+	a, err := d.deps.findArticleBySlug(slug)
+	if err != nil || a == nil {
+		t.Fatalf("load %s revision: %v", slug, err)
+	}
+	return a.Revision
 }
 
 // TestMCPToolAnnotations pins what each tool claims to do to the site. A client
@@ -312,13 +325,13 @@ func TestMCPToolAnnotations(t *testing.T) {
 		t.Error("create_article adds a post and is not idempotent")
 	}
 
-	// refresh_feeds is the only tool that contacts anybody else.
+	// Feed refreshes and remote image imports contact other servers.
 	for _, tool := range listed.Tools {
 		if tool.Annotations == nil || tool.Annotations.OpenWorldHint == nil {
 			continue
 		}
 		open := *tool.Annotations.OpenWorldHint
-		if want := tool.Name == "refresh_feeds"; open != want {
+		if want := tool.Name == "refresh_feeds" || tool.Name == "add_image"; open != want {
 			t.Errorf("%s openWorldHint = %v, want %v", tool.Name, open, want)
 		}
 	}
@@ -559,7 +572,7 @@ func TestMCPArticleResources(t *testing.T) {
 		t.Fatalf("a new post did not appear: %+v", listed.Resources)
 	}
 
-	mcpCall(t, d, "delete_article", `{"slug":"hello"}`)
+	mcpCall(t, d, "delete_article", `{"slug":"hello","expected_revision":"`+articleRevision(t, d, "hello")+`"}`)
 	listed = mcpListResources(t, d)
 	if len(listed.Resources) != 1 {
 		t.Fatalf("a deleted post did not drop off: %+v", listed.Resources)

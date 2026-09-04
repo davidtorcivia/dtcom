@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
+	"davidtorcivia.com/dtcom/internal/safehttp"
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
 
@@ -55,30 +55,12 @@ type limitedBody struct {
 
 func (b limitedBody) Close() error { return b.closer.Close() }
 
-// feedTransport blocks fetches of private and link-local addresses. Feed
-// URLs are configured by the site owner, but the API/MCP surface can write
-// them with a bearer token — this keeps a leaked token from turning the
-// poller into a scheduled internal-network probe (RFC1918 services, the
-// link-local cloud metadata endpoint) whose findings land on /links.
-// Loopback is allowed: a self-hosted local feed is a legitimate target, and
-// the only thing on this host's loopback is dtcom's own auth-protected
-// surface.
+// feedTransport blocks fetches of private, loopback, and link-local addresses.
+// Feed URLs are configured by the site owner, but the API/MCP surface can write
+// them with a bearer token. This keeps a leaked token from turning the poller
+// into a scheduled internal-network probe.
 func feedTransport(max int64) http.RoundTripper {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	base := &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				host = addr
-			}
-			if ip := net.ParseIP(host); ip != nil &&
-				(ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()) {
-				return nil, fmt.Errorf("feed fetch to private address %s refused", addr)
-			}
-			return dialer.DialContext(ctx, network, addr)
-		},
-	}
+	base := safehttp.PublicTransport(10 * time.Second)
 	return limitedTransport{base: base, max: max}
 }
 
@@ -93,11 +75,10 @@ type Poller struct {
 }
 
 func NewPoller(st *store.Store) *Poller {
-	fp := gofeed.NewParser()
 	// gofeed's zero-value client has no timeout at all, so a feed server that
 	// accepts the connection and never responds would block the poller
 	// forever.
-	fp.Client = &http.Client{
+	return NewPollerWithClient(st, &http.Client{
 		Timeout:   perFeedTimeout,
 		Transport: feedTransport(maxFeedBytes),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -109,7 +90,14 @@ func NewPoller(st *store.Store) *Poller {
 			}
 			return nil
 		},
-	}
+	})
+}
+
+// NewPollerWithClient permits callers to supply a deliberately constrained
+// client, primarily for local integration tests.
+func NewPollerWithClient(st *store.Store, client *http.Client) *Poller {
+	fp := gofeed.NewParser()
+	fp.Client = client
 	fp.UserAgent = "dtcom-feed-reader/1.0 (+https://github.com/dtorcivia)"
 	return &Poller{store: st, fp: fp}
 }

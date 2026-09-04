@@ -45,10 +45,17 @@ func registerAdmin(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("POST /admin/site/favicon/reset", d.requireAuth(d.adminFaviconReset))
 	mux.HandleFunc("POST /admin/site/pgp/refresh", d.requireAuth(d.adminPGPRefresh))
 	mux.HandleFunc("POST /admin/images", d.requireAuth(d.adminImageUpload))
+	mux.HandleFunc("GET /admin/media", d.requireAuth(d.adminMedia))
+	mux.HandleFunc("POST /admin/media/upload", d.requireAuth(d.adminMediaUpload))
+	mux.HandleFunc("POST /admin/media/{name}/delete", d.requireAuth(d.adminMediaDelete))
 	mux.HandleFunc("GET /admin/integrations", d.requireAuth(d.adminIntegrations))
 	mux.HandleFunc("POST /admin/tokens", d.requireAuth(d.adminTokenCreate))
 	mux.HandleFunc("POST /admin/tokens/{id}/revoke", d.requireAuth(d.adminTokenRevoke))
 	mux.HandleFunc("POST /admin/regenerate", d.requireAuth(d.adminRegenerate))
+	mux.HandleFunc("GET /admin/activity", d.requireAuth(d.adminActivity))
+	mux.HandleFunc("POST /admin/activity/{id}/undo", d.requireAuth(d.adminAuditUndo))
+	mux.HandleFunc("GET /admin/mentions", d.requireAuth(d.adminMentions))
+	mux.HandleFunc("POST /admin/mentions/{id}/{status}", d.requireAuth(d.adminMentionModerate))
 	registerAdminBackups(mux, d)
 	registerAdminFeeds(mux, d)
 	registerAdminSiteLists(mux, d)
@@ -781,6 +788,7 @@ func (d *Deps) adminPostEdit(w http.ResponseWriter, r *http.Request) {
 		}
 		data["Title"] = "Edit Post"
 		data["Article"] = *a
+		data["PreviewURL"] = d.previewURL(a.Slug, time.Now().Add(7*24*time.Hour))
 	}
 	d.adminTmpls.render(w, "post-edit", data)
 }
@@ -801,12 +809,20 @@ func (d *Deps) adminPostSave(w http.ResponseWriter, r *http.Request) {
 		date = time.Now().Format("2006-01-02")
 	}
 	in := articleInput{
-		Title:       strings.TrimSpace(r.FormValue("title")),
-		Date:        date,
-		Description: strings.TrimSpace(r.FormValue("description")),
-		Tags:        parseTags(r.FormValue("tags")),
-		Body:        r.FormValue("body"),
-		Draft:       r.FormValue("draft") == "on",
+		Title:            strings.TrimSpace(r.FormValue("title")),
+		Date:             date,
+		Description:      strings.TrimSpace(r.FormValue("description")),
+		Tags:             parseTags(r.FormValue("tags")),
+		Body:             r.FormValue("body"),
+		Draft:            r.FormValue("draft") == "on",
+		Agent:            strings.TrimSpace(r.FormValue("agent")),
+		PublishAt:        parsePublishAt(r.FormValue("publish_at")),
+		ExpectedRevision: r.FormValue("revision"),
+	}
+	if origSlug != "" {
+		if a, _ := d.findArticleBySlug(origSlug); a != nil {
+			in.Cover = a.Cover
+		}
 	}
 
 	// Editing an existing post: reuse its slug and overwrite its source file.
@@ -838,7 +854,12 @@ func (d *Deps) adminPostSave(w http.ResponseWriter, r *http.Request) {
 // first one just wrote.
 func (d *Deps) postSaveOK(w http.ResponseWriter, r *http.Request, slug string) {
 	if wantsJSON(r) {
-		writeJSON(w, http.StatusOK, map[string]string{"slug": slug})
+		result := map[string]string{"slug": slug}
+		if a, _ := d.findArticleBySlug(slug); a != nil {
+			result["revision"] = a.Revision
+			result["preview_url"] = d.previewURL(slug, time.Now().Add(7*24*time.Hour))
+		}
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
 	http.Redirect(w, r, "/admin/posts", http.StatusSeeOther)
@@ -868,14 +889,28 @@ func (d *Deps) renderPostEditError(w http.ResponseWriter, in articleInput, slug 
 	if err != nil {
 		date = time.Now()
 	}
+	publishAt, _ := time.Parse(time.RFC3339, in.PublishAt)
 	w.WriteHeader(http.StatusBadRequest)
 	d.adminTmpls.render(w, "post-edit", d.adminData("Edit Post", map[string]any{
 		"Error": cause.Error(),
 		"Article": build.Article{
 			Slug: slug, Title: in.Title, Date: date, Description: in.Description,
-			Tags: in.Tags, Draft: in.Draft, Body: in.Body,
+			Tags: in.Tags, Draft: in.Draft, Body: in.Body, Agent: in.Agent,
+			PublishAt: publishAt, Revision: in.ExpectedRevision,
 		},
 	}))
+}
+
+func parsePublishAt(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	t, err := time.ParseInLocation("2006-01-02T15:04", v, time.Local)
+	if err != nil {
+		return v
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // adminPostPreview renders the posted markdown body to HTML for the editor's
@@ -1006,27 +1041,15 @@ func (d *Deps) adminLinksStyle(w http.ResponseWriter, r *http.Request) {
 	if !parseAdminForm(w, r) {
 		return
 	}
-	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
+	err := d.mutateSite(func(site *siteconfig.Config) error {
+		if r.FormValue("hide_notes") != "" {
+			site.LinksStyle = siteconfig.LinksStyleMinimal
+		} else {
+			site.LinksStyle = siteconfig.LinksStyleFull
+		}
+		return nil
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if r.FormValue("hide_notes") != "" {
-		site.LinksStyle = siteconfig.LinksStyleMinimal
-	} else {
-		site.LinksStyle = siteconfig.LinksStyleFull
-	}
-	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := d.reloadSite(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	// /links is a static page, so the setting only becomes visible once the
-	// site is rebuilt.
-	if err := d.Engine.Rebuild(); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1078,27 +1101,20 @@ func (d *Deps) renderSiteEditWith(w http.ResponseWriter, site *siteconfig.Config
 // managed via the REST API; mutating them through a freeform textarea would be
 // error-prone.
 //
-// As with updateSiteSection, we apply the edits to a freshly-loaded copy and
-// publish it via ReloadSite rather than mutating the live shared pointer,
-// which would race the engine's reads during Rebuild.
+// As with updateSiteSection, mutateSite reloads and locks the current file so
+// concurrent edits to another section cannot be overwritten by this form.
 func (d *Deps) adminSiteSave(w http.ResponseWriter, r *http.Request) {
 	if !parseAdminForm(w, r) {
 		return
 	}
-	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	site.Title = strings.TrimSpace(r.FormValue("title"))
-	site.Description = strings.TrimSpace(r.FormValue("description"))
-	site.Bio = splitLines(r.FormValue("bio"))
+	title := strings.TrimSpace(r.FormValue("title"))
+	description := strings.TrimSpace(r.FormValue("description"))
+	bio := splitLines(r.FormValue("bio"))
 	// Anything other than the explicit "minimal" means the full style, so a
 	// missing or unexpected value can't turn the summaries off by accident.
+	linksStyle := siteconfig.LinksStyleFull
 	if r.FormValue("links_style") == siteconfig.LinksStyleMinimal {
-		site.LinksStyle = siteconfig.LinksStyleMinimal
-	} else {
-		site.LinksStyle = siteconfig.LinksStyleFull
+		linksStyle = siteconfig.LinksStyleMinimal
 	}
 	analytics := siteconfig.Analytics{
 		ScriptURL: strings.TrimSpace(r.FormValue("analytics_script")),
@@ -1107,20 +1123,18 @@ func (d *Deps) adminSiteSave(w http.ResponseWriter, r *http.Request) {
 	// Refused rather than saved-and-ignored: a tracker that silently does not
 	// load looks identical to one that is working but has no visitors, and this
 	// URL also widens the site's script-src.
-	site.Analytics = analytics
 	if err := siteconfig.ValidateAnalytics(analytics); err != nil {
-		d.renderSiteEditWith(w, site, err.Error())
+		candidate := *d.Site()
+		candidate.Title, candidate.Description, candidate.Bio = title, description, bio
+		candidate.LinksStyle, candidate.Analytics = linksStyle, analytics
+		d.renderSiteEditWith(w, &candidate, err.Error())
 		return
 	}
-	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := d.reloadSite(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := d.Engine.Rebuild(); err != nil {
+	if err := d.mutateSite(func(site *siteconfig.Config) error {
+		site.Title, site.Description, site.Bio = title, description, bio
+		site.LinksStyle, site.Analytics = linksStyle, analytics
+		return nil
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

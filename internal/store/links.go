@@ -22,14 +22,14 @@ var (
 )
 
 type Link struct {
-	ID        int64
-	Label     string
-	Href      string
-	Note      string
-	Source    string // "manual" or "rss"
-	SortDate  int64  // unix seconds
-	FeedURL   string
-	CreatedAt int64
+	ID        int64  `json:"id"`
+	Label     string `json:"label"`
+	Href      string `json:"href"`
+	Note      string `json:"note"`
+	Source    string `json:"source"`    // "manual" or "rss"
+	SortDate  int64  `json:"sort_date"` // unix seconds
+	FeedURL   string `json:"feed_url"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 // SanitizeHref returns the href unchanged if it has a safe scheme (http,

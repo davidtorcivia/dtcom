@@ -1,12 +1,15 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +17,45 @@ import (
 
 	"davidtorcivia.com/dtcom/internal/store"
 )
+
+const (
+	scopeRead    = "read"
+	scopeDrafts  = "drafts"
+	scopePublish = "publish"
+	scopeDelete  = "delete"
+	scopeOps     = "ops"
+)
+
+type principal struct {
+	Name   string
+	Scopes map[string]bool
+	All    bool
+}
+
+func (p *principal) allows(scope string) bool {
+	return p != nil && (p.All || p.Scopes[scope] || scope == scopeDrafts && p.Scopes[scopePublish])
+}
+
+type principalContextKey struct{}
+
+func principalFromContext(ctx context.Context) *principal {
+	p, _ := ctx.Value(principalContextKey{}).(*principal)
+	return p
+}
+
+func actorFromContext(ctx context.Context) string {
+	if p := principalFromContext(ctx); p != nil {
+		return p.Name
+	}
+	return "admin"
+}
+
+func requireScope(ctx context.Context, scope string) error {
+	if !principalFromContext(ctx).allows(scope) {
+		return fmt.Errorf("token lacks %q scope", scope)
+	}
+	return nil
+}
 
 // writeJSON encodes v as JSON with the given status and content type.
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -50,7 +92,21 @@ func decodeJSON(r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxJSONBody)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(v)
+	return decodeOneJSON(dec, v)
+}
+
+func decodeOneJSON(dec *json.Decoder, v any) error {
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // wantsJSON reports whether the caller asked for a JSON answer rather than a
@@ -89,23 +145,27 @@ func checkBearer(r *http.Request, token string) bool {
 // The environment token is kept as a permanent fallback on purpose: it is how
 // the deployment is configured, and it means locking yourself out by revoking
 // the wrong managed token is always recoverable.
-func (d *Deps) authorizeToken(r *http.Request) bool {
+func (d *Deps) authorizeToken(r *http.Request) (*principal, bool) {
 	if checkBearer(r, d.Cfg.APIToken) {
-		return true
+		return &principal{Name: "bootstrap", All: true}, true
 	}
 	provided := bearerToken(r)
 	if provided == "" || d.Store == nil {
-		return false
+		return nil, false
 	}
 	t, err := d.Store.LookupAPIToken(provided)
 	if err != nil {
 		if !errors.Is(err, store.ErrTokenNotFound) {
 			slog.Error("api token lookup", "err", err)
 		}
-		return false
+		return nil, false
 	}
 	d.touchToken(t)
-	return true
+	scopes := map[string]bool{}
+	for _, scope := range strings.Split(t.Scopes, ",") {
+		scopes[strings.TrimSpace(scope)] = true
+	}
+	return &principal{Name: "token:" + t.Name, Scopes: scopes}, true
 }
 
 // touchToken records a token's use, at most once a minute per token — the

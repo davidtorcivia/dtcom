@@ -102,7 +102,8 @@ type limiters struct {
 	// SQLite query against the single write connection).
 	search *rateLimiter
 	// track throttles the unauthenticated view beacon, which writes a row.
-	track *rateLimiter
+	track    *rateLimiter
+	mentions *rateLimiter
 }
 
 func newLimiters() *limiters {
@@ -112,5 +113,6 @@ func newLimiters() *limiters {
 		bearer:      newRateLimiter(10, 10*time.Second),
 		search:      newRateLimiter(30, 200*time.Millisecond),
 		track:       newRateLimiter(60, time.Second),
+		mentions:    newRateLimiter(10, time.Minute),
 	}
 }

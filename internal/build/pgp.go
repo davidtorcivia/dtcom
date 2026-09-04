@@ -123,13 +123,13 @@ func (e *Engine) renderPGP(written *pathSet) error {
 	if e.pgpOut == nil {
 		return nil
 	}
-	if err := e.writeFile(filepath.Join(e.cfg.PublicDir, "pgp.asc"), []byte(e.pgpOut.page.Armored+"\n"), written); err != nil {
+	if err := e.writeFile(filepath.Join(e.outputRoot(), "pgp.asc"), []byte(e.pgpOut.page.Armored+"\n"), written); err != nil {
 		return err
 	}
 	if !e.pgpOut.wkd {
 		return nil
 	}
-	root := filepath.Join(e.cfg.PublicDir, ".well-known", "openpgpkey")
+	root := filepath.Join(e.outputRoot(), ".well-known", "openpgpkey")
 	policy := []byte("\n")
 	if err := e.writeFile(filepath.Join(root, "policy"), policy, written); err != nil {
 		return err

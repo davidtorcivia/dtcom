@@ -52,13 +52,15 @@
     // part of the draft: a title typed and then lost to a crash is as annoying
     // as a lost paragraph, and the restore prompt would be wrong if it only
     // compared bodies.
-    var FIELDS = ['title', 'date', 'description', 'tags'];
+    var FIELDS = ['title', 'date', 'description', 'tags', 'publish_at', 'agent'];
     var fields = {};
     FIELDS.forEach(function (name) {
       fields[name] = form ? form.querySelector('[name="' + name + '"]') : null;
     });
     var draftBox = form ? form.querySelector('[name="draft"]') : null;
     var slugField = form ? form.querySelector('[name="slug"]') : null;
+    var revisionField = form ? form.querySelector('[name="revision"]') : null;
+    var previewRow = form ? form.querySelector('.signed-preview') : null;
 
     function snapshot() {
       var snap = { body: ta.value };
@@ -256,12 +258,12 @@
             return body;
           });
         })
-        .then(function (body) { onSaved(sent, body.slug); })
+        .then(function (body) { onSaved(sent, body.slug, body.revision, body.preview_url); })
         .catch(function (err) { setStatus(err.message, true); })
         .then(function () { savingNow = false; });
     }
 
-    function onSaved(sent, slug) {
+    function onSaved(sent, slug, revision, previewURL) {
       // A new post has no slug until the server derives one from the title.
       // Writing it back into the hidden field is what makes the second save an
       // update of the file the first one created — without it the next save
@@ -272,6 +274,16 @@
         if (window.history && window.history.replaceState) {
           window.history.replaceState(null, '', '/admin/posts/' + slug + '/edit');
         }
+      }
+      if (revision && revisionField) {
+        revisionField.value = revision;
+      }
+      if (previewURL && previewRow) {
+        var previewLink = previewRow.querySelector('a');
+        if (previewLink) {
+          previewLink.href = previewURL;
+        }
+        previewRow.hidden = false;
       }
       saved = sent;
       clearStash();

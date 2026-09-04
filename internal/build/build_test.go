@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
@@ -19,6 +20,52 @@ type testEngine struct {
 	publicDir  string
 	postsDir   string
 	store      *store.Store
+}
+
+func TestRebuildSchedulesAndWritesAgentVersion(t *testing.T) {
+	te := newTestEngine(t)
+	te.writePost(t, "2026-01-31-future.md", "---\ntitle: Future\ndate: 2026-01-31\ndescription: fallback\nagent: 'Future: key fact.'\npublish_at: 2999-01-01T00:00:00Z\n---\n\nLong body.\n")
+	if err := te.engine.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	if te.engine.NextPublishAt().Before(time.Now()) {
+		t.Fatalf("next publish = %v", te.engine.NextPublishAt())
+	}
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "posts", "future", "index.html")); !os.IsNotExist(err) {
+		t.Fatalf("future post was published early: %v", err)
+	}
+
+	te.writePost(t, "2026-01-31-future.md", "---\ntitle: Future\ndate: 2026-01-31\ndescription: fallback\nagent: 'Future: key fact.'\npublish_at: 2000-01-01T00:00:00Z\n---\n\nLong body.\n")
+	if err := te.engine.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	agent := te.mustRead(t, "posts", "future.agent.md")
+	if !strings.Contains(agent, "Future: key fact.") || !strings.Contains(agent, "Revision:") {
+		t.Fatalf("agent version missing compressed content or revision:\n%s", agent)
+	}
+}
+
+func TestFailedRebuildKeepsLastGeneration(t *testing.T) {
+	te := newTestEngine(t)
+	te.writePost(t, "2026-01-31-stable.md", "---\ntitle: Stable\ndate: 2026-01-31\n---\n\nGood body.\n")
+	if err := te.engine.Rebuild(); err != nil {
+		t.Fatal(err)
+	}
+	active := te.engine.PublicDir()
+	if !strings.HasPrefix(active, filepath.Join(te.publicDir, generationDir)+string(filepath.Separator)) {
+		t.Fatalf("generation created outside writable public directory: %s", active)
+	}
+	before := te.mustRead(t, "posts", "stable", "index.html")
+	te.writePost(t, "2026-01-31-stable.md", "---\ntitle: [broken\n---\n\nBad body.\n")
+	if err := te.engine.Rebuild(); err == nil {
+		t.Fatal("invalid source unexpectedly rebuilt")
+	}
+	if te.engine.PublicDir() != active {
+		t.Fatal("failed rebuild switched the active generation")
+	}
+	if after := te.mustRead(t, "posts", "stable", "index.html"); after != before {
+		t.Fatal("failed rebuild changed the served page")
+	}
 }
 
 func newTestEngine(t *testing.T) *testEngine {
@@ -83,7 +130,7 @@ func (te *testEngine) writePost(t *testing.T, name, body string) {
 
 func (te *testEngine) mustRead(t *testing.T, rel ...string) string {
 	t.Helper()
-	p := filepath.Join(append([]string{te.publicDir}, rel...)...)
+	p := filepath.Join(append([]string{te.engine.PublicDir()}, rel...)...)
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatalf("read %s: %v", p, err)
@@ -140,7 +187,7 @@ func TestRebuildWritesPublic(t *testing.T) {
 	if !ok {
 		t.Fatalf("og:image is not an absolute URL on the site: %q", ogURL)
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, filepath.FromSlash(rel))); err != nil {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), filepath.FromSlash(rel))); err != nil {
 		t.Errorf("og:image %q does not exist on disk: %v", ogURL, err)
 	}
 	// The card is what makes summary_large_image honest; without an image
@@ -202,7 +249,7 @@ func TestRebuildPrunesDeletedPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
-	stale := filepath.Join(te.publicDir, "posts", "gone", "index.html")
+	stale := filepath.Join(te.engine.PublicDir(), "posts", "gone", "index.html")
 	if _, err := os.Stat(stale); err != nil {
 		t.Fatalf("expected %s after first build: %v", stale, err)
 	}
@@ -213,17 +260,18 @@ func TestRebuildPrunesDeletedPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	stale = filepath.Join(te.engine.PublicDir(), "posts", "gone", "index.html")
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("deleted post is still published at %s (err=%v)", stale, err)
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, "posts", "gone")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "posts", "gone")); !os.IsNotExist(err) {
 		t.Error("emptied post directory was not removed")
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, "posts", "gone.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "posts", "gone.md")); !os.IsNotExist(err) {
 		t.Error("deleted post's .md variant is still published")
 	}
 	// The surviving post must be untouched by the prune.
-	if _, err := os.Stat(filepath.Join(te.publicDir, "posts", "hello", "index.html")); err != nil {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "posts", "hello", "index.html")); err != nil {
 		t.Errorf("prune removed a live page: %v", err)
 	}
 }
@@ -235,7 +283,7 @@ func TestRebuildPrunesDraftedPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
-	page := filepath.Join(te.publicDir, "posts", "hello", "index.html")
+	page := filepath.Join(te.engine.PublicDir(), "posts", "hello", "index.html")
 	if _, err := os.Stat(page); err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +292,7 @@ func TestRebuildPrunesDraftedPost(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	page = filepath.Join(te.engine.PublicDir(), "posts", "hello", "index.html")
 	if _, err := os.Stat(page); !os.IsNotExist(err) {
 		t.Errorf("drafted post is still published (err=%v)", err)
 	}
@@ -260,7 +309,7 @@ func TestRebuildKeepsPagesReadable(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- te.engine.Rebuild() }()
-	home := filepath.Join(te.publicDir, "index.html")
+	home := filepath.Join(te.engine.PublicDir(), "index.html")
 	for {
 		select {
 		case err := <-done:

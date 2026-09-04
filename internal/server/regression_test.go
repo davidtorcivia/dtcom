@@ -55,7 +55,7 @@ func TestSearchToleratesQuerySyntax(t *testing.T) {
 	}
 	// A term with a trailing quote must still match the indexed word.
 	rec := d.get("/api/search?q=" + url.QueryEscape(`body"`))
-	if !strings.Contains(rec.Body.String(), `"Slug":"hello"`) {
+	if !strings.Contains(rec.Body.String(), `"slug":"hello"`) {
 		t.Errorf("quoted term found nothing: %s", rec.Body.String())
 	}
 }
@@ -365,7 +365,7 @@ func TestFrontmatterSurvivesAwkwardValues(t *testing.T) {
 		Tags:        []string{"color, grading", "a]b", "  spaced  "},
 		Body:        "Body\r\nwith CRLF",
 	}
-	out := renderArticleFile(in, "2026-01-01", "slug")
+	out := renderArticleFile(in, "2026-01-01")
 
 	// The generated file must round-trip through the loader unchanged.
 	dir := t.TempDir()

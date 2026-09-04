@@ -31,7 +31,7 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "dtcom", Version: "1.0"}, &mcp.ServerOptions{
 		Instructions: "Read and write the content of a single-author website: articles " +
 			"(markdown posts), links, and site.yml configuration. Writes land on disk and " +
-			"trigger a rebuild, so they are live immediately.",
+			"trigger a rebuild. Drafts and future-dated posts remain private until published.",
 	})
 	registerArticleTools(srv, d)
 	registerImageTools(srv, d)
@@ -39,6 +39,7 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 	registerSiteTools(srv, d)
 	registerOpsTools(srv, d)
 	registerArticleResources(srv, d)
+	registerMCPScopeGuard(srv)
 
 	streamable := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return srv },
@@ -62,10 +63,39 @@ func registerMCP(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
 		// Same throttled bearer check the REST API uses, so the token can't be
 		// guessed any faster here.
-		if !d.authorizeBearer(w, r) {
+		p, ok := d.authorizeBearer(w, r)
+		if !ok {
 			return
 		}
-		streamable.ServeHTTP(w, r)
+		streamable.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, p)))
+	})
+}
+
+func registerMCPScopeGuard(srv *mcp.Server) {
+	toolScopes := map[string]string{
+		"list_articles": scopeRead, "get_article": scopeRead, "search_articles": scopeRead,
+		"list_images": scopeRead, "list_links": scopeRead, "get_site": scopeRead, "get_stats": scopeRead,
+		"create_article": scopeDrafts, "update_article": scopeDrafts, "patch_article": scopeDrafts, "add_image": scopeDrafts,
+		"add_link": scopePublish, "update_bio": scopePublish, "update_nav": scopePublish,
+		"update_social": scopePublish, "update_rss_feeds": scopePublish,
+		"delete_article": scopeDelete, "remove_link": scopeDelete,
+		"regenerate": scopeOps, "refresh_feeds": scopeOps,
+	}
+	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			required := ""
+			if method == "tools/call" {
+				if p, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok {
+					required = toolScopes[p.Name]
+				}
+			} else if method == "resources/list" || method == "resources/read" {
+				required = scopeRead
+			}
+			if required != "" && !principalFromContext(ctx).allows(required) {
+				return nil, fmt.Errorf("token lacks %q scope", required)
+			}
+			return next(ctx, method, req)
+		}
 	})
 }
 
@@ -274,12 +304,17 @@ type articleDetail struct {
 	Tags        []string `json:"tags"`
 	Draft       bool     `json:"draft"`
 	Body        string   `json:"body"`
+	Agent       string   `json:"agent,omitempty"`
+	PublishAt   string   `json:"publish_at,omitempty"`
+	Updated     string   `json:"updated,omitempty"`
+	Revision    string   `json:"revision"`
 }
 
 // articleResult is what the tools that change an article answer with.
 type articleResult struct {
-	Slug   string `json:"slug"`
-	Status string `json:"status"`
+	Slug     string `json:"slug"`
+	Status   string `json:"status"`
+	Revision string `json:"revision,omitempty"`
 }
 
 type linkAddedResult struct {
@@ -322,6 +357,8 @@ type createArticleArgs struct {
 	Tags        []string `json:"tags,omitempty" jsonschema:"Tag list."`
 	Slug        string   `json:"slug,omitempty" jsonschema:"Override slug. Derived from title if omitted."`
 	Draft       bool     `json:"draft,omitempty" jsonschema:"Save as a draft (excluded from build)."`
+	Agent       string   `json:"agent,omitempty" jsonschema:"Heavily compressed agent-only version: facts, entities, claims, and retrieval cues."`
+	PublishAt   string   `json:"publish_at,omitempty" jsonschema:"RFC3339 time to publish automatically."`
 }
 
 // updateArticleArgs uses pointers for the fields that may legitimately be set
@@ -330,13 +367,16 @@ type createArticleArgs struct {
 // list. (Treating "" as "unchanged", as an earlier version did, made those
 // edits impossible.)
 type updateArticleArgs struct {
-	Slug        string    `json:"slug" jsonschema:"Slug of the article to update."`
-	Title       *string   `json:"title,omitempty" jsonschema:"New title."`
-	Body        *string   `json:"body,omitempty" jsonschema:"New markdown body."`
-	Date        string    `json:"date,omitempty" jsonschema:"New date (YYYY-MM-DD). Defaults to the original."`
-	Description *string   `json:"description,omitempty" jsonschema:"New description."`
-	Tags        *[]string `json:"tags,omitempty" jsonschema:"New tag list."`
-	Draft       *bool     `json:"draft,omitempty" jsonschema:"Toggle draft status."`
+	Slug             string    `json:"slug" jsonschema:"Slug of the article to update."`
+	Title            *string   `json:"title,omitempty" jsonschema:"New title."`
+	Body             *string   `json:"body,omitempty" jsonschema:"New markdown body."`
+	Date             string    `json:"date,omitempty" jsonschema:"New date (YYYY-MM-DD). Defaults to the original."`
+	Description      *string   `json:"description,omitempty" jsonschema:"New description."`
+	Tags             *[]string `json:"tags,omitempty" jsonschema:"New tag list."`
+	Draft            *bool     `json:"draft,omitempty" jsonschema:"Toggle draft status."`
+	Agent            *string   `json:"agent,omitempty" jsonschema:"New compressed agent-only version."`
+	PublishAt        *string   `json:"publish_at,omitempty" jsonschema:"RFC3339 scheduled publication time; empty clears it."`
+	ExpectedRevision string    `json:"expected_revision" jsonschema:"Revision returned by get_article. The update is rejected if the article changed."`
 }
 
 type searchArticlesArgs struct {
@@ -348,10 +388,11 @@ type searchArticlesArgs struct {
 // wire for a one-line correction — and the client relays in front of this
 // server are where those payloads go to die.
 type patchArticleArgs struct {
-	Slug    string `json:"slug" jsonschema:"Slug of the article to patch."`
-	Find    string `json:"find" jsonschema:"Exact text to find in the body. Must match exactly once unless all is set."`
-	Replace string `json:"replace" jsonschema:"Text to put in its place. Empty deletes the matched text."`
-	All     bool   `json:"all,omitempty" jsonschema:"Replace every occurrence instead of requiring exactly one."`
+	Slug             string `json:"slug" jsonschema:"Slug of the article to patch."`
+	Find             string `json:"find" jsonschema:"Exact text to find in the body. Must match exactly once unless all is set."`
+	Replace          string `json:"replace" jsonschema:"Text to put in its place. Empty deletes the matched text."`
+	All              bool   `json:"all,omitempty" jsonschema:"Replace every occurrence instead of requiring exactly one."`
+	ExpectedRevision string `json:"expected_revision" jsonschema:"Revision returned by get_article. The patch is rejected if the article changed."`
 }
 
 // patchResult reports how many places actually changed, which is the only way
@@ -360,6 +401,12 @@ type patchResult struct {
 	Slug         string `json:"slug"`
 	Status       string `json:"status"`
 	Replacements int    `json:"replacements"`
+	Revision     string `json:"revision"`
+}
+
+type deleteArticleArgs struct {
+	Slug             string `json:"slug" jsonschema:"Article slug."`
+	ExpectedRevision string `json:"expected_revision" jsonschema:"Revision returned by get_article."`
 }
 
 func registerArticleTools(srv *mcp.Server, d *Deps) {
@@ -390,6 +437,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		return nil, articleDetail{
 			Slug: a.Slug, Title: a.Title, Date: a.Date.Format("2006-01-02"),
 			Description: a.Description, Tags: a.Tags, Draft: a.Draft, Body: a.Body,
+			Agent: a.Agent, PublishAt: formatOptionalTime(a.PublishAt), Updated: formatOptionalTime(a.Updated), Revision: a.Revision,
 		}, nil
 	})
 
@@ -398,6 +446,11 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		Annotations: writes("Write a new article", false),
 		Description: "Create a new article. Writes content/posts/<date>-<slug>.md and rebuilds." + figureConventions,
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args createArticleArgs) (*mcp.CallToolResult, articleResult, error) {
+		if !args.Draft {
+			if err := requireScope(ctx, scopePublish); err != nil {
+				return nil, articleResult{}, err
+			}
+		}
 		slug, status, err := d.createArticle(articleInput{
 			Title:       args.Title,
 			Slug:        args.Slug,
@@ -406,11 +459,14 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 			Tags:        args.Tags,
 			Body:        args.Body,
 			Draft:       args.Draft,
+			Agent:       args.Agent,
+			PublishAt:   args.PublishAt,
+			Actor:       actorFromContext(ctx),
 		})
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("create failed (%d): %w", status, err)
 		}
-		return nil, articleResult{Slug: slug, Status: "created"}, nil
+		return nil, articleResult{Slug: slug, Status: "created", Revision: d.currentArticleRevision(slug)}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -425,18 +481,29 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		if a == nil {
 			return nil, articleResult{}, fmt.Errorf("article %q not found", args.Slug)
 		}
+		resultDraft := orKeep(args.Draft, a.Draft)
+		if !a.Draft || !resultDraft {
+			if err := requireScope(ctx, scopePublish); err != nil {
+				return nil, articleResult{}, err
+			}
+		}
 		status, err := d.updateArticle(args.Slug, articleInput{
-			Title:       orKeep(args.Title, a.Title),
-			Date:        args.Date,
-			Description: orKeep(args.Description, a.Description),
-			Tags:        orKeep(args.Tags, a.Tags),
-			Body:        orKeep(args.Body, a.Body),
-			Draft:       orKeep(args.Draft, a.Draft),
+			Title:            orKeep(args.Title, a.Title),
+			Date:             args.Date,
+			Description:      orKeep(args.Description, a.Description),
+			Tags:             orKeep(args.Tags, a.Tags),
+			Body:             orKeep(args.Body, a.Body),
+			Draft:            resultDraft,
+			Cover:            a.Cover,
+			Agent:            orKeep(args.Agent, a.Agent),
+			PublishAt:        orKeep(args.PublishAt, formatOptionalTime(a.PublishAt)),
+			ExpectedRevision: args.ExpectedRevision,
+			Actor:            actorFromContext(ctx),
 		})
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("update failed (%d): %w", status, err)
 		}
-		return nil, articleResult{Slug: args.Slug, Status: "updated"}, nil
+		return nil, articleResult{Slug: args.Slug, Status: "updated", Revision: d.currentArticleRevision(args.Slug)}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -457,6 +524,14 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		if a == nil {
 			return nil, patchResult{}, fmt.Errorf("article %q not found", args.Slug)
 		}
+		if args.ExpectedRevision == "" || args.ExpectedRevision != a.Revision {
+			return nil, patchResult{}, fmt.Errorf("article changed or expected_revision missing; current revision is %s", a.Revision)
+		}
+		if !a.Draft {
+			if err := requireScope(ctx, scopePublish); err != nil {
+				return nil, patchResult{}, err
+			}
+		}
 		// Refusing an ambiguous match is the whole safety story here: a body
 		// this caller cannot see, edited by a substring it guessed at, is
 		// exactly where a blind replace-all quietly mangles a post.
@@ -469,24 +544,29 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 				"find text appears %d times in %q; give more surrounding text to pin one, or set all", n, args.Slug)
 		}
 		status, err := d.updateArticle(args.Slug, articleInput{
-			Title:       a.Title,
-			Description: a.Description,
-			Tags:        a.Tags,
-			Body:        strings.ReplaceAll(a.Body, args.Find, args.Replace),
-			Draft:       a.Draft,
+			Title:            a.Title,
+			Description:      a.Description,
+			Tags:             a.Tags,
+			Body:             strings.ReplaceAll(a.Body, args.Find, args.Replace),
+			Draft:            a.Draft,
+			Cover:            a.Cover,
+			Agent:            a.Agent,
+			PublishAt:        formatOptionalTime(a.PublishAt),
+			ExpectedRevision: args.ExpectedRevision,
+			Actor:            actorFromContext(ctx),
 		})
 		if err != nil {
 			return nil, patchResult{}, fmt.Errorf("patch failed (%d): %w", status, err)
 		}
-		return nil, patchResult{Slug: args.Slug, Status: "patched", Replacements: n}, nil
+		return nil, patchResult{Slug: args.Slug, Status: "patched", Replacements: n, Revision: d.currentArticleRevision(args.Slug)}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "delete_article",
 		Annotations: destroys("Delete an article"),
 		Description: "Delete an article by slug. Removes the .md file and rebuilds.",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, args getArticleArgs) (*mcp.CallToolResult, articleResult, error) {
-		status, err := d.deleteArticle(args.Slug)
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args deleteArticleArgs) (*mcp.CallToolResult, articleResult, error) {
+		status, err := d.deleteArticleRevision(args.Slug, actorFromContext(ctx), args.ExpectedRevision)
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("delete failed (%d): %w", status, err)
 		}

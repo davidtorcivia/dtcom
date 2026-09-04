@@ -5,6 +5,7 @@
 {{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
 <form method="post" action="/admin/posts/save" class="admin-form">
 <input name="slug" type="hidden" value="{{with $a}}{{.Slug}}{{end}}">
+<input name="revision" type="hidden" value="{{with $a}}{{.Revision}}{{end}}">
 <label class="admin-label" for="f-title">Title</label>
 <input id="f-title" name="title" required value="{{with $a}}{{.Title}}{{end}}" class="admin-input admin-input-title">
 <label class="admin-label" for="f-date">Date</label>
@@ -16,6 +17,11 @@
 {{/* $a is absent on the "new post" page, so .Draft has to be guarded rather
      than reached through a bare {{if $a.Draft}}. */}}
 <label class="admin-label admin-checkbox"><input type="checkbox" name="draft"{{with $a}}{{if .Draft}} checked{{end}}{{end}}> Draft</label>
+<label class="admin-label" for="f-publish-at">Publish at <span class="admin-hint">(optional)</span></label>
+<input id="f-publish-at" name="publish_at" type="datetime-local" value="{{with $a}}{{formatDateTimeLocal .PublishAt}}{{end}}" class="admin-input admin-mono">
+<label class="admin-label" for="f-agent">AGENT version <span class="admin-hint">compressed facts and retrieval cues, not prose</span></label>
+<textarea id="f-agent" name="agent" class="admin-input admin-mono" rows="5">{{with $a}}{{.Agent}}{{end}}</textarea>
+<p class="admin-hint signed-preview"{{if not .PreviewURL}} hidden{{end}}>Signed preview, valid for 7 days: <a href="{{.PreviewURL}}" target="_blank" rel="noopener">open preview</a></p>
 <div class="editor">
 <div class="editor-toolbar">
 <button type="button" data-mode="write" class="active" aria-pressed="true">Write</button>

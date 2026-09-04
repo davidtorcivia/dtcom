@@ -25,6 +25,7 @@ func TestPGPAscMissingIs404(t *testing.T) {
 
 func TestPGPAscAndWKDServed(t *testing.T) {
 	d := newTestDeps(t)
+	d.pubDir = d.deps.Engine.PublicDir()
 	hash := pgp.WKDHash("a")
 	if err := os.WriteFile(filepath.Join(d.pubDir, "pgp.asc"), []byte("-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nxx\n-----END PGP PUBLIC KEY BLOCK-----\n"), 0o644); err != nil {
 		t.Fatal(err)

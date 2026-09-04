@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -37,6 +38,12 @@ var (
 // result. Every handler here goes through it so none mutates the live shared
 // config, which the engine reads during Rebuild.
 func (d *Deps) mutateSite(fn func(*siteconfig.Config) error) error {
+	d.siteMu.Lock()
+	defer d.siteMu.Unlock()
+	original, err := os.ReadFile(d.Cfg.SiteYAMLPath)
+	if err != nil {
+		return err
+	}
 	site, err := siteconfig.Load(d.Cfg.SiteYAMLPath)
 	if err != nil {
 		return err
@@ -47,12 +54,20 @@ func (d *Deps) mutateSite(fn func(*siteconfig.Config) error) error {
 	if err := siteconfig.Save(d.Cfg.SiteYAMLPath, site); err != nil {
 		return err
 	}
+	rollback := func(cause error) error {
+		_ = writeFileAtomic(d.Cfg.SiteYAMLPath, original)
+		_ = d.reloadSite()
+		return cause
+	}
 	if err := d.reloadSite(); err != nil {
-		return err
+		return rollback(err)
 	}
 	// Nav and social links are baked into every generated page's header and
 	// footer, so nothing changes on the site until it is rebuilt.
-	return d.Engine.Rebuild()
+	if err := d.Engine.Rebuild(); err != nil {
+		return rollback(err)
+	}
+	return nil
 }
 
 // checkedHref trims an href and rejects anything that is not a safe scheme or

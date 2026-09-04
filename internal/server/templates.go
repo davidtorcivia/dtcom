@@ -104,10 +104,18 @@ func adminTemplateFuncs(fp *assets.Fingerprinter) template.FuncMap {
 		"join":           func(ss []string, sep string) string { return strings.Join(ss, sep) },
 		"formatDate":     func(t time.Time) string { return t.Format("2006-01-02") },
 		"formatDateUnix": func(u int64) string { return time.Unix(u, 0).Format("2006-01-02") },
-		"add":            func(a, b int) int { return a + b },
+		"formatDateTimeLocal": func(t time.Time) string {
+			if t.IsZero() {
+				return ""
+			}
+			return t.Local().Format("2006-01-02T15:04")
+		},
+		"isFuture": func(t time.Time) bool { return !t.IsZero() && t.After(time.Now()) },
+		"add":      func(a, b int) int { return a + b },
 		// lower lets a range label ("30 days") sit mid-sentence without a
 		// second copy of the string in lower case.
-		"lower": strings.ToLower,
+		"lower":     strings.ToLower,
+		"imageName": func(url string) string { return filepath.Base(url) },
 		// halfOf labels the chart's midpoint gridline, rounded up so the
 		// midpoint of a 1-view chart reads 1 rather than 0.
 		"halfOf": func(n int64) int64 { return (n + 1) / 2 },

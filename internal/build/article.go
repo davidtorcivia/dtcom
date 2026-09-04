@@ -2,6 +2,8 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +22,11 @@ type Article struct {
 	Tags        []string  `yaml:"tags"`
 	Cover       string    `yaml:"cover"`
 	Draft       bool      `yaml:"draft"`
+	Updated     time.Time `yaml:"updated"`
+	PublishAt   time.Time `yaml:"publish_at"`
+	Agent       string    `yaml:"agent"`
 	Body        string    `yaml:"-"` // markdown body, no frontmatter
+	Revision    string    `yaml:"-"`
 
 	// SourcePath is the absolute path to the .md file.
 	SourcePath string `yaml:"-"`
@@ -55,6 +61,8 @@ func LoadArticles(dir string) ([]Article, error) {
 		// Trim leading blank-line separator left behind after the closing
 		// frontmatter delimiter.
 		a.Body = strings.TrimLeft(string(rest), "\r\n")
+		sum := sha256.Sum256(raw)
+		a.Revision = hex.EncodeToString(sum[:])[:16]
 		a.SourcePath = path
 		if a.Slug == "" {
 			a.Slug = slugFromFilename(e.Name())

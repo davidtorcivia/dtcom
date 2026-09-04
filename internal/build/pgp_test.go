@@ -162,10 +162,10 @@ func TestRebuildSkipsWKDWhenDomainDiffers(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, "pgp.asc")); err != nil {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "pgp.asc")); err != nil {
 		t.Fatalf("pgp.asc: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, ".well-known")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), ".well-known")); !os.IsNotExist(err) {
 		t.Fatal("WKD published for a foreign email domain")
 	}
 }
@@ -232,6 +232,7 @@ func TestRebuildPrunesPGPWhenKeyGoesAway(t *testing.T) {
 	if err := engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	publicDir = engine.PublicDir()
 	if _, err := os.Stat(filepath.Join(publicDir, "pgp.asc")); err != nil {
 		t.Fatal(err)
 	}
@@ -240,6 +241,7 @@ func TestRebuildPrunesPGPWhenKeyGoesAway(t *testing.T) {
 	if err := engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
+	publicDir = engine.PublicDir()
 	if _, err := os.Stat(filepath.Join(publicDir, "pgp.asc")); !os.IsNotExist(err) {
 		t.Fatal("pgp.asc survived a 404")
 	}
@@ -264,7 +266,7 @@ func TestRebuildWithoutPGPCacheLeavesMailto(t *testing.T) {
 	if strings.Contains(home, "data-contact-sheet") {
 		t.Fatal("contact sheet appeared without a cache")
 	}
-	if _, err := os.Stat(filepath.Join(te.publicDir, "pgp.asc")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(te.engine.PublicDir(), "pgp.asc")); !os.IsNotExist(err) {
 		t.Fatal("pgp.asc written with no cache")
 	}
 }

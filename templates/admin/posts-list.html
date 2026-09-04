@@ -7,7 +7,7 @@
 </div>
 <ul class="admin-list">
 {{range .Articles}}<li>
-<span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{end}}</span>
+<span><span class="admin-list-date">{{formatDate .Date}}</span> <a href="/admin/posts/{{.Slug}}/edit">{{.Title}}</a>{{if .Draft}} <em class="admin-draft-flag">(draft)</em>{{else if isFuture .PublishAt}} <em class="admin-draft-flag">(scheduled {{formatDateTimeLocal .PublishAt}})</em>{{end}}</span>
 <form method="post" action="/admin/posts/{{.Slug}}/delete" data-confirm="Delete &ldquo;{{.Title}}&rdquo;?" data-confirm-detail="This removes the markdown file and unpublishes the post. It cannot be undone." data-confirm-action="Delete post"><button type="submit" class="admin-link-btn">delete</button></form>
 </li>{{else}}<li class="admin-empty">No posts yet. <a href="/admin/posts/new">Write the first one.</a></li>{{end}}
 </ul>

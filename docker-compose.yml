@@ -4,7 +4,7 @@ services:
       context: .
       args:
         VERSION: ${DTCOM_VERSION:-dev}
-    image: dtcom:latest
+    image: ${DTCOM_IMAGE:-dtcom:dev}
     restart: unless-stopped
     ports:
       # Bound to loopback: nothing here terminates TLS, so the port is meant to
@@ -34,7 +34,7 @@ services:
       # Behind a proxy the real client address arrives in a header. Leave this
       # off if the port is published directly — otherwise any client can forge
       # its own address and evade the login rate limiter.
-      DTCOM_TRUST_PROXY: ${DTCOM_TRUST_PROXY:-true}
+      DTCOM_TRUST_PROXY: ${DTCOM_TRUST_PROXY:-false}
     # The container writes to /content (posts created via admin/API/MCP), so
     # the bind mount below has to be writable by this uid. 65532 is the
     # distroless "nonroot" user; override if the host directory is owned by
@@ -44,11 +44,6 @@ services:
       # content is mounted read-write: the admin UI, REST API, and MCP tools
       # all create and edit markdown files here.
       - ./content:/content
-      # templates + static are mounted read-only for live editing; the engine
-      # re-reads templates on every rebuild, so an edit shows up without a
-      # restart.
-      - ./static:/static:ro
-      - ./templates:/templates:ro
       # data (SQLite db + uploaded images) is a named volume, persisted across
       # rebuilds
       - dtcom-data:/data

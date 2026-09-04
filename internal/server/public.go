@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/url"
@@ -49,12 +50,13 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 	// generated social preview cards. Named after their own content like the
 	// uploads above, so the same indefinite cache applies: a card's bytes can
 	// never change under a given URL, and an edited post produces a new one.
-	mux.Handle("GET /og/", cacheControl(imageCacheControl,
-		d.noDirListing(http.StripPrefix("/og/", http.FileServer(http.Dir(filepath.Join(d.Cfg.PublicDir, "og")))))))
+	mux.Handle("GET /og/", cacheControl(imageCacheControl, d.noDirListing(d.publicFiles("/og/", "og"))))
 
 	// unauthed dynamic endpoints
 	mux.HandleFunc("GET /api/search", d.handleSearch)
 	mux.HandleFunc("POST /api/track", d.handleTrack)
+	mux.HandleFunc("POST /webmention", d.handleWebmention)
+	mux.HandleFunc("GET /preview/{slug}", d.handleSignedPreview)
 
 	// liveness/readiness probe for the reverse proxy or orchestrator. Cheap
 	// and dependency-free on purpose: it answers "is this process serving?",
@@ -64,6 +66,7 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /readyz", d.handleReady)
 
 	// content-negotiated article routes. Go's ServeMux doesn't allow a literal
 	// suffix after a {wildcard}, so both /posts/<slug> and /posts/<slug>.md are
@@ -97,12 +100,48 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 	mux.HandleFunc("/", d.handleNotFound)
 }
 
+func (d *Deps) handleReady(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	status := map[string]any{"status": "ready"}
+	code := http.StatusOK
+	if d.Store == nil || d.Store.Ping() != nil || d.Engine == nil || d.Engine.LastBuildAt().IsZero() || d.Engine.LastBuildError() != "" {
+		status["status"] = "not_ready"
+		code = http.StatusServiceUnavailable
+	}
+	if d.Engine != nil {
+		status["last_build"] = d.Engine.LastBuildAt()
+		status["last_build_error"] = d.Engine.LastBuildError()
+		status["next_publish"] = d.Engine.NextPublishAt()
+	}
+	writeJSON(w, code, status)
+}
+
+func (d *Deps) publicDir() string {
+	if d.Engine != nil {
+		return d.Engine.PublicDir()
+	}
+	return d.Cfg.PublicDir
+}
+
+func (d *Deps) publicFiles(prefix, subdir string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, prefix)
+		root := filepath.Join(d.publicDir(), subdir)
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if name == "" || !confined(path, root) || !fileExists(path) {
+			d.handleNotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, path)
+	})
+}
+
 // servePublicFile returns a handler that serves a specific file from PublicDir.
 // A missing file means the build hasn't produced that page, which is a 404 for
 // the visitor rather than a server error.
 func (d *Deps) servePublicFile(rel string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(d.Cfg.PublicDir, rel)
+		path := filepath.Join(d.publicDir(), rel)
 		if !fileExists(path) {
 			d.handleNotFound(w, r)
 			return
@@ -116,7 +155,7 @@ func (d *Deps) servePublicFile(rel string) http.HandlerFunc {
 // the build hasn't produced one yet.
 func (d *Deps) handleNotFound(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	page := filepath.Join(d.Cfg.PublicDir, "404.html")
+	page := filepath.Join(d.publicDir(), "404.html")
 	body, err := os.ReadFile(page)
 	if err != nil {
 		http.Error(w, "404 page not found", http.StatusNotFound)
@@ -128,7 +167,7 @@ func (d *Deps) handleNotFound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Deps) servePGPAsc(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(d.Cfg.PublicDir, "pgp.asc")
+	path := filepath.Join(d.publicDir(), "pgp.asc")
 	if !fileExists(path) {
 		http.NotFound(w, r)
 		return
@@ -144,7 +183,7 @@ func (d *Deps) serveWKD(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	root := filepath.Join(d.Cfg.PublicDir, ".well-known", "openpgpkey")
+	root := filepath.Join(d.publicDir(), ".well-known", "openpgpkey")
 	full := filepath.Join(root, filepath.FromSlash(rel))
 	if !fileExists(full) || !confined(full, root) {
 		http.NotFound(w, r)
@@ -381,11 +420,15 @@ func (d *Deps) trackablePath(p string) bool {
 	if !ok || !validSlug(slug) {
 		return false
 	}
-	return fileExists(filepath.Join(d.Cfg.PublicDir, "posts", slug, "index.html"))
+	return fileExists(filepath.Join(d.publicDir(), "posts", slug, "index.html"))
 }
 
 func (d *Deps) handleArticle(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	if agent, ok := strings.CutSuffix(slug, ".agent.md"); ok {
+		d.serveArticleVariant(w, r, agent, ".agent.md")
+		return
+	}
 	// A trailing ".md" selects the markdown source variant. We strip it before
 	// resolving the file so the on-disk layout is posts/<slug>.md.
 	if md, ok := strings.CutSuffix(slug, ".md"); ok {
@@ -402,28 +445,36 @@ func (d *Deps) handleArticle(w http.ResponseWriter, r *http.Request) {
 		d.handleNotFound(w, r)
 		return
 	}
-	path := filepath.Join(d.Cfg.PublicDir, "posts", slug, "index.html")
+	path := filepath.Join(d.publicDir(), "posts", slug, "index.html")
 	if !fileExists(path) {
 		d.handleNotFound(w, r)
 		return
 	}
 	w.Header().Set("Cache-Control", pageCacheControl)
+	w.Header().Add("Link", fmt.Sprintf("</posts/%s.md>; rel=alternate; type=\"text/markdown\", </posts/%s.agent.md>; rel=alternate; type=\"text/markdown\"; title=\"Agent version\"", slug, slug))
 	http.ServeFile(w, r, path)
 }
 
 // serveArticleMD is the shared body for the .md route and the markdown branch
 // of content negotiation.
 func (d *Deps) serveArticleMD(w http.ResponseWriter, r *http.Request, slug string) {
+	d.serveArticleVariant(w, r, slug, ".md")
+}
+
+func (d *Deps) serveArticleVariant(w http.ResponseWriter, r *http.Request, slug, suffix string) {
 	if !validSlug(slug) {
 		d.handleNotFound(w, r)
 		return
 	}
-	path := filepath.Join(d.Cfg.PublicDir, "posts", slug+".md")
+	path := filepath.Join(d.publicDir(), "posts", slug+suffix)
 	if !fileExists(path) {
 		d.handleNotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	if suffix == ".agent.md" {
+		w.Header().Set("X-Agent-Optimized", "true")
+	}
 	w.Header().Set("Cache-Control", pageCacheControl)
 	http.ServeFile(w, r, path)
 }

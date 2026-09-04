@@ -19,7 +19,10 @@ type Article struct {
 	Title       string
 	Slug        string
 	Date        time.Time
+	Updated     time.Time
 	Description string
+	Content     string
+	Tags        []string
 }
 
 // maxFeedItems caps the outbound feed. Readers only ever show the recent
@@ -41,8 +44,10 @@ func rfc822(t time.Time) string {
 	return t.Format("Mon, 02 Jan 2006 15:04:05 -0700")
 }
 
+func cdata(s string) string { return strings.ReplaceAll(s, "]]>", "]]]]><![CDATA[>") }
+
 const rssTmpl = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
 <channel>
 <title>{{.Site.Title | xmlEscape}}</title>
 <link>{{.BaseURL | xmlEscape}}</link>
@@ -56,13 +61,15 @@ const rssTmpl = `<?xml version="1.0" encoding="UTF-8"?>
 <guid isPermaLink="true">{{$.BaseURL | xmlEscape}}/posts/{{.Slug | xmlEscape}}</guid>
 <pubDate>{{.Date | rfc822}}</pubDate>
 <description>{{.Description | xmlEscape}}</description>
+{{range .Tags}}<category>{{. | xmlEscape}}</category>{{end}}
+<content:encoded><![CDATA[{{.Content | cdata}}]]></content:encoded>
 </item>
 {{end}}</channel>
 </rss>
 `
 
 var feedTmpl = template.Must(template.New("feed").
-	Funcs(template.FuncMap{"xmlEscape": xmlEscape, "rfc822": rfc822}).
+	Funcs(template.FuncMap{"xmlEscape": xmlEscape, "rfc822": rfc822, "cdata": cdata}).
 	Parse(rssTmpl))
 
 // RenderFeed renders the RSS document for the given published articles, newest
@@ -79,8 +86,12 @@ func RenderFeed(site *siteconfig.Config, arts []Article) (string, error) {
 	// subscriber's reader think the feed changed.
 	buildDate := time.Time{}
 	for _, a := range arts {
-		if a.Date.After(buildDate) {
-			buildDate = a.Date
+		changed := a.Date
+		if a.Updated.After(changed) {
+			changed = a.Updated
+		}
+		if changed.After(buildDate) {
+			buildDate = changed
 		}
 	}
 	if buildDate.IsZero() {

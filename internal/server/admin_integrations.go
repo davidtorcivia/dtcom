@@ -90,7 +90,21 @@ func (d *Deps) adminTokenCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(r.FormValue("name"))
-	raw, t, err := d.Store.CreateAPIToken(name)
+	var scopes []string
+	for _, scope := range []string{scopeRead, scopeDrafts, scopePublish, scopeDelete, scopeOps} {
+		if r.FormValue("scope_"+scope) != "" {
+			scopes = append(scopes, scope)
+		}
+	}
+	if len(scopes) == 0 {
+		if r.FormValue("scopes_present") != "" {
+			d.renderIntegrations(w, "Choose at least one token scope.", nil)
+			return
+		}
+		// Form clients written before scopes were added get the safe default.
+		scopes = []string{scopeRead, scopeDrafts}
+	}
+	raw, t, err := d.Store.CreateScopedAPIToken(name, strings.Join(scopes, ","))
 	if err != nil {
 		slog.Error("create api token", "err", err)
 		d.renderIntegrations(w, "Could not create the token.", nil)
@@ -229,10 +243,10 @@ type apiEndpoint struct {
 
 var apiEndpoints = []apiEndpoint{
 	{"GET", "/api/v1/articles", "List every article, including drafts."},
-	{"POST", "/api/v1/articles", "Create an article. Body: {title, body, date, description, tags, slug, draft}."},
+	{"POST", "/api/v1/articles", "Create an article. Body includes title, body, metadata, agent, draft, and publish_at."},
 	{"GET", "/api/v1/articles/{slug}", "Fetch one article's frontmatter and markdown body."},
-	{"PUT", "/api/v1/articles/{slug}", "Replace an article. Same body shape as create."},
-	{"DELETE", "/api/v1/articles/{slug}", "Delete an article and its rendered pages."},
+	{"PUT", "/api/v1/articles/{slug}", "Replace an article. Requires its current revision or If-Match."},
+	{"DELETE", "/api/v1/articles/{slug}", "Delete an article. Requires If-Match with its current revision."},
 	{"GET", "/api/v1/links", "List links (manual + RSS-imported)."},
 	{"POST", "/api/v1/links", "Add a link. Body: {label, href, note, sort_date}."},
 	{"DELETE", "/api/v1/links/{id}", "Remove a manual link."},
@@ -251,7 +265,7 @@ type mcpToolGroup struct {
 }
 
 var mcpToolGroups = []mcpToolGroup{
-	{"Articles", []string{"list_articles", "get_article", "create_article", "update_article", "delete_article", "search_articles"}},
+	{"Articles", []string{"list_articles", "get_article", "create_article", "update_article", "patch_article", "delete_article", "search_articles"}},
 	{"Images", []string{"list_images", "add_image"}},
 	{"Links", []string{"list_links", "add_link", "remove_link"}},
 	{"Site", []string{"get_site", "update_bio", "update_nav", "update_social", "update_rss_feeds"}},

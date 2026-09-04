@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"davidtorcivia.com/dtcom/internal/assets"
 	"davidtorcivia.com/dtcom/internal/auth"
@@ -18,6 +19,8 @@ import (
 	"davidtorcivia.com/dtcom/internal/siteconfig"
 	"davidtorcivia.com/dtcom/internal/store"
 )
+
+func testFuture() time.Time { return time.Now().Add(time.Hour) }
 
 // testDeps bundles the wired mux with the bits individual tests need to poke
 // at (the live Deps.Site closure, the bearer token, the public dir).
@@ -136,9 +139,10 @@ func newTestDeps(t *testing.T) *testDeps {
 		ReloadSite: reloadSite,
 		Store:      st,
 		Engine:     engine,
-		Poller:     feeds.NewPoller(st),
+		Poller:     feeds.NewPollerWithClient(st, &http.Client{Timeout: time.Second}),
 		Auth:       a,
 	}
+	t.Cleanup(d.renditionWG.Wait)
 	return &testDeps{mux: New(d), deps: d, apiToken: "apitok", pubDir: pubDir}
 }
 
