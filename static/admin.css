@@ -1155,7 +1155,7 @@ input[type="file"]:focus-visible::file-selector-button {
 @media (max-width: 640px) {
   .admin-nav { position: relative; width: 100%; justify-content: flex-start; }
   .admin-nav-more { position: static; }
-  .admin-nav-panel { left: 0; right: 0; min-width: 0; }
+  .admin-nav-panel { left: 0; right: 0; min-width: 0; grid-template-columns: 1fr; }
 
   .bar-list li { grid-template-columns: minmax(0, 1fr) 5rem; }
   .bar-track { display: none; }
