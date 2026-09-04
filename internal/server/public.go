@@ -72,6 +72,7 @@ func registerPublic(mux *http.ServeMux, d *Deps) {
 	// suffix after a {wildcard}, so both /posts/<slug> and /posts/<slug>.md are
 	// dispatched from one handler that inspects the matched slug for a ".md"
 	// suffix. An explicit "Accept: text/markdown" also selects the .md variant.
+	mux.HandleFunc("GET /posts/{slug}/agent.md", d.handleAgentArticle)
 	mux.HandleFunc("GET /posts/{slug}", d.handleArticle)
 
 	// pre-rendered public files (home, links, search, feed, sitemap, robots)
@@ -104,7 +105,7 @@ func (d *Deps) handleReady(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	status := map[string]any{"status": "ready"}
 	code := http.StatusOK
-	if d.Store == nil || d.Store.Ping() != nil || d.Engine == nil || d.Engine.LastBuildAt().IsZero() || d.Engine.LastBuildError() != "" {
+	if d.Store == nil || d.Store.Ping() != nil || d.Engine == nil || d.Engine.LastBuildAt().IsZero() {
 		status["status"] = "not_ready"
 		code = http.StatusServiceUnavailable
 	}
@@ -425,10 +426,6 @@ func (d *Deps) trackablePath(p string) bool {
 
 func (d *Deps) handleArticle(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
-	if agent, ok := strings.CutSuffix(slug, ".agent.md"); ok {
-		d.serveArticleVariant(w, r, agent, ".agent.md")
-		return
-	}
 	// A trailing ".md" selects the markdown source variant. We strip it before
 	// resolving the file so the on-disk layout is posts/<slug>.md.
 	if md, ok := strings.CutSuffix(slug, ".md"); ok {
@@ -451,7 +448,7 @@ func (d *Deps) handleArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", pageCacheControl)
-	w.Header().Add("Link", fmt.Sprintf("</posts/%s.md>; rel=alternate; type=\"text/markdown\", </posts/%s.agent.md>; rel=alternate; type=\"text/markdown\"; title=\"Agent version\"", slug, slug))
+	w.Header().Add("Link", fmt.Sprintf("</posts/%s.md>; rel=alternate; type=\"text/markdown\", </posts/%s/agent.md>; rel=alternate; type=\"text/markdown\"; title=\"Agent version\"", slug, slug))
 	http.ServeFile(w, r, path)
 }
 
@@ -459,6 +456,23 @@ func (d *Deps) handleArticle(w http.ResponseWriter, r *http.Request) {
 // of content negotiation.
 func (d *Deps) serveArticleMD(w http.ResponseWriter, r *http.Request, slug string) {
 	d.serveArticleVariant(w, r, slug, ".md")
+}
+
+func (d *Deps) handleAgentArticle(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if !validSlug(slug) {
+		d.handleNotFound(w, r)
+		return
+	}
+	path := filepath.Join(d.publicDir(), "posts", slug, "agent.md")
+	if !fileExists(path) {
+		d.handleNotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("X-Agent-Optimized", "true")
+	w.Header().Set("Cache-Control", pageCacheControl)
+	http.ServeFile(w, r, path)
 }
 
 func (d *Deps) serveArticleVariant(w http.ResponseWriter, r *http.Request, slug, suffix string) {
@@ -472,9 +486,6 @@ func (d *Deps) serveArticleVariant(w http.ResponseWriter, r *http.Request, slug,
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	if suffix == ".agent.md" {
-		w.Header().Set("X-Agent-Optimized", "true")
-	}
 	w.Header().Set("Cache-Control", pageCacheControl)
 	http.ServeFile(w, r, path)
 }

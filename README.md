@@ -69,7 +69,7 @@ agent: "Claim: … Entities: … Retrieval: …"
 Body text in markdown.
 ```
 
-The watcher rebuilds once writes settle (~500ms). Drafts (`draft: true`) are excluded. A future `publish_at` stays private until its timestamp, then publishes without a deploy. Every published post has its original `/posts/<slug>.md` plus `/posts/<slug>.agent.md`, a compact facts/entities/claims representation for agents. Agent-authored posts should provide `agent`; older posts fall back to their description.
+The watcher rebuilds once writes settle (~500ms). Drafts (`draft: true`) are excluded. A future `publish_at` stays private until its timestamp, then publishes without a deploy. Every published post has its original `/posts/<slug>.md` plus `/posts/<slug>/agent.md`, a compact facts/entities/claims representation for agents. Agent-authored posts should provide `agent`; older posts fall back to their description.
 
 Beyond GFM, a post body gets footnotes (`[^1]`), `==highlight==`, syntax-highlighted code fences, LaTeX math (`$inline$` and `$$display$$`, typeset by KaTeX, loaded only on pages that have some), and figures:
 

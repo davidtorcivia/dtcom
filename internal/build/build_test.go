@@ -39,7 +39,7 @@ func TestRebuildSchedulesAndWritesAgentVersion(t *testing.T) {
 	if err := te.engine.Rebuild(); err != nil {
 		t.Fatal(err)
 	}
-	agent := te.mustRead(t, "posts", "future.agent.md")
+	agent := te.mustRead(t, "posts", "future", "agent.md")
 	if !strings.Contains(agent, "Future: key fact.") || !strings.Contains(agent, "Revision:") {
 		t.Fatalf("agent version missing compressed content or revision:\n%s", agent)
 	}

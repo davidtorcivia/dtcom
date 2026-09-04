@@ -827,21 +827,22 @@ func (d *Deps) adminPostSave(w http.ResponseWriter, r *http.Request) {
 
 	// Editing an existing post: reuse its slug and overwrite its source file.
 	if origSlug != "" {
-		if _, err := d.updateArticle(origSlug, in); err != nil {
+		revision, _, err := d.updateArticle(origSlug, in)
+		if err != nil {
 			d.postSaveFailed(w, r, in, origSlug, err)
 			return
 		}
-		d.postSaveOK(w, r, origSlug)
+		d.postSaveOK(w, r, origSlug, revision)
 		return
 	}
 
 	// New post: slugify the title and create.
-	slug, _, err := d.createArticle(in)
+	slug, revision, _, err := d.createArticle(in)
 	if err != nil {
 		d.postSaveFailed(w, r, in, "", err)
 		return
 	}
-	d.postSaveOK(w, r, slug)
+	d.postSaveOK(w, r, slug, revision)
 }
 
 // postSaveOK answers a save that landed. The editor saves in place over fetch
@@ -852,13 +853,10 @@ func (d *Deps) adminPostSave(w http.ResponseWriter, r *http.Request) {
 // until the file is created, and without writing it back into the form the
 // second save would take the create path again and collide with the file the
 // first one just wrote.
-func (d *Deps) postSaveOK(w http.ResponseWriter, r *http.Request, slug string) {
+func (d *Deps) postSaveOK(w http.ResponseWriter, r *http.Request, slug, revision string) {
 	if wantsJSON(r) {
-		result := map[string]string{"slug": slug}
-		if a, _ := d.findArticleBySlug(slug); a != nil {
-			result["revision"] = a.Revision
-			result["preview_url"] = d.previewURL(slug, time.Now().Add(7*24*time.Hour))
-		}
+		result := map[string]string{"slug": slug, "revision": revision,
+			"preview_url": d.previewURL(slug, time.Now().Add(7*24*time.Hour))}
 		writeJSON(w, http.StatusOK, result)
 		return
 	}

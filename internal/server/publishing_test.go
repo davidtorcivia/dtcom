@@ -13,7 +13,7 @@ import (
 
 func TestSignedPreviewAndReadiness(t *testing.T) {
 	d := newTestDeps(t)
-	if slug, _, err := d.deps.createArticle(articleInput{Title: "Private Draft", Body: "secret preview", Draft: true}); err != nil || slug != "private-draft" {
+	if slug, _, _, err := d.deps.createArticle(articleInput{Title: "Private Draft", Body: "secret preview", Draft: true}); err != nil || slug != "private-draft" {
 		t.Fatalf("create draft = %q, %v", slug, err)
 	}
 
@@ -38,6 +38,17 @@ func TestSignedPreviewAndReadiness(t *testing.T) {
 	d.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("readyz = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(d.deps.Cfg.ContentDir, "posts", "broken.md"), []byte("---\ntitle: [broken\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.deps.Engine.Rebuild(); err == nil {
+		t.Fatal("broken source unexpectedly rebuilt")
+	}
+	rec = httptest.NewRecorder()
+	d.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "last_build_error") {
+		t.Fatalf("last-good readiness = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -68,12 +79,12 @@ func TestSiteMutationRollsBackWhenBuildFails(t *testing.T) {
 
 func TestAuditUndoRestoresOriginalDateAndSource(t *testing.T) {
 	d := newTestDeps(t)
-	slug, _, err := d.deps.createArticle(articleInput{Title: "Undo Me", Date: "2026-01-01", Body: "before"})
+	slug, _, _, err := d.deps.createArticle(articleInput{Title: "Undo Me", Date: "2026-01-01", Body: "before"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision := articleRevision(t, d, slug)
-	if _, err := d.deps.updateArticle(slug, articleInput{Title: "Undo Me", Date: "2026-02-02", Body: "after", ExpectedRevision: revision}); err != nil {
+	if _, _, err := d.deps.updateArticle(slug, articleInput{Title: "Undo Me", Date: "2026-02-02", Body: "after", ExpectedRevision: revision}); err != nil {
 		t.Fatal(err)
 	}
 	audits, err := d.deps.Store.ListArticleAudit(10)
@@ -95,7 +106,7 @@ func TestAuditUndoRestoresOriginalDateAndSource(t *testing.T) {
 
 func TestDraftTokenCannotPublish(t *testing.T) {
 	d := newTestDeps(t)
-	liveSlug, _, err := d.deps.createArticle(articleInput{Title: "Existing Live", Body: "live"})
+	liveSlug, _, _, err := d.deps.createArticle(articleInput{Title: "Existing Live", Body: "live"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +143,7 @@ func TestDraftTokenCannotPublish(t *testing.T) {
 func TestAgentArticleVariant(t *testing.T) {
 	d := newTestDeps(t)
 	rec := httptest.NewRecorder()
-	d.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/posts/hello.agent.md", nil))
+	d.mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/posts/hello/agent.md", nil))
 	if rec.Code != http.StatusOK || rec.Header().Get("X-Agent-Optimized") != "true" || !strings.Contains(rec.Body.String(), "Canonical:") {
 		t.Fatalf("agent variant = %d headers=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
 	}

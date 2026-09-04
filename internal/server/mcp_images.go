@@ -212,14 +212,16 @@ func (d *Deps) listStoredImages(query string) ([]storedImage, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].URL < out[j].URL })
 	markThemePairs(out, d.postsDir())
-	markImageUsage(out, d.postsDir())
+	if err := markImageUsage(out, d.postsDir()); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
-func markImageUsage(imgs []storedImage, postsDir string) {
+func markImageUsage(imgs []storedImage, postsDir string) error {
 	arts, err := build.LoadArticles(postsDir)
 	if err != nil {
-		return
+		return err
 	}
 	for i := range imgs {
 		for _, a := range arts {
@@ -228,6 +230,7 @@ func markImageUsage(imgs []storedImage, postsDir string) {
 			}
 		}
 	}
+	return nil
 }
 
 // markThemePairs fills in Theme and Pair for images already used as a

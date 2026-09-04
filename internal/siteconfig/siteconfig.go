@@ -14,20 +14,20 @@ import (
 )
 
 type Config struct {
-	Title       string       `yaml:"title" json:"title"`
-	Author      string       `yaml:"author" json:"author"`
-	BaseURL     string       `yaml:"base_url" json:"base_url"`
-	Description string       `yaml:"description" json:"description"`
-	Bio         []string     `yaml:"bio" json:"bio"`
-	Nav         []NavLink    `yaml:"nav" json:"nav"`
-	Social      []SocialLink `yaml:"social" json:"social"`
-	RSSFeeds    []RSSFeed    `yaml:"rss_feeds" json:"rss_feeds"`
-	FooterLeft  []string     `yaml:"footer_left" json:"footer_left"`
+	Title       string       `yaml:"title"`
+	Author      string       `yaml:"author"`
+	BaseURL     string       `yaml:"base_url"`
+	Description string       `yaml:"description"`
+	Bio         []string     `yaml:"bio"`
+	Nav         []NavLink    `yaml:"nav"`
+	Social      []SocialLink `yaml:"social"`
+	RSSFeeds    []RSSFeed    `yaml:"rss_feeds"`
+	FooterLeft  []string     `yaml:"footer_left"`
 
 	// LinksStyle controls how /links renders each entry: "full" shows the
 	// summary line under the title, "minimal" is date :: title only. Empty
 	// means "full".
-	LinksStyle string `yaml:"links_style" json:"links_style"`
+	LinksStyle string `yaml:"links_style"`
 
 	// Favicon is the site-relative URL of an uploaded favicon, e.g.
 	// "/images/<hash>.png". Empty means the built-in /static/favicon.svg.
@@ -36,11 +36,11 @@ type Config struct {
 	// data volume next to post images and is served by the same handler with
 	// the same immutable-cache header — the name is a content hash, so a new
 	// favicon is a new URL and no cache ever has to be invalidated.
-	Favicon string `yaml:"favicon" json:"favicon"`
+	Favicon string `yaml:"favicon"`
 
 	// Analytics is an optional third-party tracker. Empty means none, which is
 	// the default and the state a fresh site starts in.
-	Analytics Analytics `yaml:"analytics,omitempty" json:"analytics,omitempty"`
+	Analytics Analytics `yaml:"analytics,omitempty"`
 }
 
 // Analytics describes a self-hosted or third-party analytics script — Umami,
@@ -55,7 +55,7 @@ type Config struct {
 type Analytics struct {
 	// ScriptURL is the tag's src, e.g. "https://cloud.umami.is/script.js".
 	// Must be an absolute http(s) URL; anything else is rejected on save.
-	ScriptURL string `yaml:"script_url,omitempty" json:"script_url,omitempty"`
+	ScriptURL string `yaml:"script_url,omitempty"`
 
 	// Data holds the provider's configuration, rendered as data-* attributes.
 	// Umami wants {"website-id": "…"}, Plausible {"domain": "…"}, Fathom
@@ -68,7 +68,7 @@ type Analytics struct {
 	// Schema is concerned. (A nil *slice* is fine — those infer as
 	// ["null","array"] — so this is the only field that needs it.) The name is
 	// spelled as Go spells it so the key on the wire does not change.
-	Data map[string]string `yaml:"data,omitempty" json:"data,omitempty"`
+	Data map[string]string `yaml:"data,omitempty" json:"Data,omitempty"`
 }
 
 // Enabled reports whether a tracker is configured.
@@ -206,20 +206,20 @@ func mailtoAddress(href string) string {
 }
 
 type NavLink struct {
-	Label string `yaml:"label" json:"label"`
-	Href  string `yaml:"href" json:"href"`
+	Label string `yaml:"label"`
+	Href  string `yaml:"href"`
 }
 
 type SocialLink struct {
-	Label string `yaml:"label" json:"label"`
-	Href  string `yaml:"href" json:"href"`
-	Icon  string `yaml:"icon" json:"icon"`
+	Label string `yaml:"label"`
+	Href  string `yaml:"href"`
+	Icon  string `yaml:"icon"`
 }
 
 type RSSFeed struct {
-	URL     string `yaml:"url" json:"url"`
-	Label   string `yaml:"label" json:"label"`
-	Enabled bool   `yaml:"enabled" json:"enabled"`
+	URL     string `yaml:"url"`
+	Label   string `yaml:"label"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 // Default returns the config a brand-new site starts from.

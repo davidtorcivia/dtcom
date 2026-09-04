@@ -55,7 +55,7 @@ func TestSearchToleratesQuerySyntax(t *testing.T) {
 	}
 	// A term with a trailing quote must still match the indexed word.
 	rec := d.get("/api/search?q=" + url.QueryEscape(`body"`))
-	if !strings.Contains(rec.Body.String(), `"slug":"hello"`) {
+	if !strings.Contains(rec.Body.String(), `"Slug":"hello"`) {
 		t.Errorf("quoted term found nothing: %s", rec.Body.String())
 	}
 }
@@ -400,7 +400,7 @@ func TestFrontmatterSurvivesAwkwardValues(t *testing.T) {
 func TestCreateRejectsDuplicateSlugAcrossDates(t *testing.T) {
 	d := newTestDeps(t)
 	in := articleInput{Title: "Hello", Date: "2027-05-05", Body: "x"}
-	_, status, err := d.deps.createArticle(in)
+	_, _, status, err := d.deps.createArticle(in)
 	if err == nil {
 		t.Fatalf("expected a conflict, got status %d", status)
 	}

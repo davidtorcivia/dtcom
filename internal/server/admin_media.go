@@ -39,6 +39,10 @@ func (d *Deps) adminMediaDelete(w http.ResponseWriter, r *http.Request) {
 		d.renderMedia(w, "Invalid image name.")
 		return
 	}
+	d.siteMu.Lock()
+	defer d.siteMu.Unlock()
+	d.postMu.Lock()
+	defer d.postMu.Unlock()
 	url := "/images/" + name
 	images, err := d.listStoredImages("")
 	if err != nil {

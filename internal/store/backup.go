@@ -59,9 +59,9 @@ func (s *Store) Snapshot(path string) error {
 // justify a handful of incremented counters. The counters still travel in every
 // archive that is taken; they are just not a reason to take one.
 //
-// Links and tokens do count: a link added by hand or imported from a feed is
-// authored state that exists nowhere else. The search index is left out because
-// it is derived from the posts, which are fingerprinted from disk.
+// Links, tokens, and Webmentions count because they exist nowhere else. The
+// search index is left out because it is derived from the posts, which are
+// fingerprinted from disk.
 func (s *Store) ContentFingerprint() (string, error) {
 	h := sha256.New()
 	rows, err := s.conn().Query(`
@@ -98,6 +98,25 @@ func (s *Store) ContentFingerprint() (string, error) {
 		fmt.Fprintf(h, "token\x00%s\x00%s\x00%d\x00%d\n", name, hash, created, revoked)
 	}
 	if err := tokens.Err(); err != nil {
+		return "", err
+	}
+
+	mentions, err := s.conn().Query(`SELECT direction, source, target, status, title, created_at, verified_at
+		FROM webmentions ORDER BY id`)
+	if err != nil {
+		return "", err
+	}
+	defer mentions.Close()
+	for mentions.Next() {
+		var direction, source, target, status, title string
+		var created, verified int64
+		if err := mentions.Scan(&direction, &source, &target, &status, &title, &created, &verified); err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "mention\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\n",
+			direction, source, target, status, title, created, verified)
+	}
+	if err := mentions.Err(); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil

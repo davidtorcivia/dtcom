@@ -22,7 +22,8 @@ func (s *Store) QueueWebmention(source, target string) (int64, error) {
 	now := time.Now().Unix()
 	_, err := s.conn().Exec(`INSERT INTO webmentions(direction,source,target,status,created_at)
 		VALUES('incoming',?,?,'pending',?) ON CONFLICT(direction,source,target)
-		DO UPDATE SET status='pending', error='', created_at=excluded.created_at`, source, target, now)
+		DO UPDATE SET status=CASE WHEN webmentions.status IN ('approved','rejected') THEN webmentions.status ELSE 'pending' END,
+		error='', created_at=excluded.created_at`, source, target, now)
 	if err != nil {
 		return 0, err
 	}
@@ -32,8 +33,8 @@ func (s *Store) QueueWebmention(source, target string) (int64, error) {
 }
 
 func (s *Store) VerifyWebmention(id int64, status, title, message string) error {
-	_, err := s.conn().Exec(`UPDATE webmentions SET status=?, title=?, error=?, verified_at=? WHERE id=?`,
-		status, title, message, time.Now().Unix(), id)
+	_, err := s.conn().Exec(`UPDATE webmentions SET status=?, title=?, error=?, verified_at=? WHERE id=? AND status='pending'`,
+		status, truncateText(title, 512), truncateText(message, 1024), time.Now().Unix(), id)
 	return err
 }
 
@@ -71,8 +72,16 @@ func (s *Store) OutgoingWebmention(source, target, status, message string) error
 	_, err := s.conn().Exec(`INSERT INTO webmentions(direction,source,target,status,error,created_at,verified_at)
 		VALUES('outgoing',?,?,?,?,?,?) ON CONFLICT(direction,source,target) DO UPDATE SET
 		status=excluded.status, error=excluded.error, verified_at=excluded.verified_at`,
-		source, target, status, message, time.Now().Unix(), time.Now().Unix())
+		source, target, status, truncateText(message, 1024), time.Now().Unix(), time.Now().Unix())
 	return err
+}
+
+func truncateText(value string, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return value
 }
 
 func (s *Store) HasOutgoingWebmention(source, target string) (bool, error) {

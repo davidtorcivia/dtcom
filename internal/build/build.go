@@ -470,7 +470,7 @@ func (e *Engine) renderArticle(a Article, written *pathSet) error {
 		agent = a.Description
 	}
 	agentDoc := fmt.Sprintf("# %s\n\n%s\n\nCanonical: %s/posts/%s\nRevision: %s\n", a.Title, agent, baseURL(site), a.Slug, a.Revision)
-	return e.writeFile(filepath.Join(e.outputRoot(), "posts", a.Slug+".agent.md"), []byte(agentDoc), written)
+	return e.writeFile(filepath.Join(dir, "agent.md"), []byte(agentDoc), written)
 }
 
 // renderHome renders the front page: bio + a date-desc index of published

@@ -905,7 +905,7 @@
         row.className = 'index-row search-row';
 
         var link = document.createElement('a');
-        link.href = '/posts/' + encodeURIComponent(hit.slug);
+        link.href = '/posts/' + encodeURIComponent(hit.Slug);
 
         var symbolCell = document.createElement('span');
         symbolCell.className = 'index-symbol-cell';
@@ -917,18 +917,18 @@
 
         var title = document.createElement('span');
         title.className = 'index-title';
-        title.textContent = hit.title || hit.slug;
+        title.textContent = hit.Title || hit.Slug;
 
         link.appendChild(symbolCell);
         link.appendChild(title);
         row.appendChild(link);
 
-        if (hit.excerpt) {
+        if (hit.Excerpt) {
           var excerpt = document.createElement('p');
           excerpt.className = 'index-excerpt';
           // Escaped server-side, with only <mark> restored — see
           // store.SearchArticles.
-          excerpt.innerHTML = hit.excerpt;
+          excerpt.innerHTML = hit.Excerpt;
           row.appendChild(excerpt);
         }
         results.appendChild(row);

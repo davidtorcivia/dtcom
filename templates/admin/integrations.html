@@ -162,7 +162,7 @@ curl -X POST {{.BaseURL}}/api/v1/articles \
 <tr><td><span class="method method-GET">GET</span></td><td><code>/healthz</code></td><td>Liveness probe for a proxy or orchestrator.</td></tr>
 <tr><td><span class="method method-GET">GET</span></td><td><code>/readyz</code></td><td>Database and last-build readiness.</td></tr>
 <tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}.md</code></td><td>Markdown source of any post.</td></tr>
-<tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}.agent.md</code></td><td>Compressed agent-oriented version.</td></tr>
+<tr><td><span class="method method-GET">GET</span></td><td><code>/posts/{slug}/agent.md</code></td><td>Compressed agent-oriented version.</td></tr>
 <tr><td><span class="method method-POST">POST</span></td><td><code>/webmention</code></td><td>Receive and verify a Webmention.</td></tr>
 </tbody>
 </table>

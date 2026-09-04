@@ -60,18 +60,18 @@ func (s *Store) AddDwell(path, day, ipHash string, secs int) error {
 }
 
 type Stats struct {
-	Total  int64       `json:"total"`
-	ByPath []PathCount `json:"by_path"`
-	ByDay  []DayCount  `json:"by_day"`
+	Total  int64
+	ByPath []PathCount
+	ByDay  []DayCount
 }
 
 type PathCount struct {
-	Path  string `json:"path"`
-	Count int64  `json:"count"`
+	Path  string
+	Count int64
 }
 type DayCount struct {
-	Day   string `json:"day"`
-	Count int64  `json:"count"`
+	Day   string
+	Count int64
 }
 
 // Bucket is one column of the views chart: a span of time and what it holds.

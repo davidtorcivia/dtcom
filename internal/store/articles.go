@@ -44,12 +44,12 @@ func (s *Store) ReindexArticles(arts []IndexedArticle) error {
 }
 
 type SearchHit struct {
-	Slug        string `json:"slug"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Slug        string
+	Title       string
+	Description string
 	// Excerpt is an HTML fragment: the matched text HTML-escaped, with the
 	// matching terms wrapped in <mark>. Safe to insert into the page as-is.
-	Excerpt string `json:"excerpt"`
+	Excerpt string
 }
 
 // Sentinels handed to FTS5's snippet() in place of the literal <mark> tags.

@@ -155,13 +155,13 @@ type linkInput struct {
 // both say "and description" — and neither actually sent it. Now that the tool
 // publishes an output schema, that gap would be advertised.
 type articleSummary struct {
-	Slug        string `json:"slug"`
-	Title       string `json:"title"`
-	Date        string `json:"date"`
-	Description string `json:"description"`
-	Draft       bool   `json:"draft"`
-	PublishAt   string `json:"publish_at,omitempty"`
-	Revision    string `json:"revision"`
+	Slug        string
+	Title       string
+	Date        string
+	Description string
+	Draft       bool
+	PublishAt   string
+	Revision    string
 }
 
 func (d *Deps) apiListArticles(w http.ResponseWriter, r *http.Request) {
@@ -218,16 +218,13 @@ func (d *Deps) apiCreateArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Actor = actorFromContext(r.Context())
-	slug, status, err := d.createArticle(in)
+	slug, revision, status, err := d.createArticle(in)
 	if err != nil {
 		writeError(w, status, err)
 		return
 	}
 	w.Header().Set("Location", "/api/v1/articles/"+slug)
-	revision := d.currentArticleRevision(slug)
-	if revision != "" {
-		w.Header().Set("ETag", `"`+revision+`"`)
-	}
+	w.Header().Set("ETag", `"`+revision+`"`)
 	writeJSON(w, http.StatusCreated, map[string]string{"slug": slug, "revision": revision})
 }
 
@@ -255,15 +252,12 @@ func (d *Deps) apiUpdateArticle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusPreconditionRequired, nil)
 		return
 	}
-	status, err := d.updateArticle(slug, in)
+	revision, status, err := d.updateArticle(slug, in)
 	if err != nil {
 		writeError(w, status, err)
 		return
 	}
-	revision := d.currentArticleRevision(slug)
-	if revision != "" {
-		w.Header().Set("ETag", `"`+revision+`"`)
-	}
+	w.Header().Set("ETag", `"`+revision+`"`)
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "revision": revision})
 }
 
@@ -304,17 +298,9 @@ func (d *Deps) findArticleBySlug(slug string) (*build.Article, error) {
 	return nil, nil
 }
 
-func (d *Deps) currentArticleRevision(slug string) string {
-	a, _ := d.findArticleBySlug(slug)
-	if a == nil {
-		return ""
-	}
-	return a.Revision
-}
-
 // createArticle writes a new post file and rebuilds. Returns
-// (slug, httpStatus, err) where status is 409 on a filename collision.
-func (d *Deps) createArticle(in articleInput) (string, int, error) {
+// (slug, revision, httpStatus, err) where status is 409 on a filename collision.
+func (d *Deps) createArticle(in articleInput) (string, string, int, error) {
 	d.postMu.Lock()
 	defer d.postMu.Unlock()
 	// ALWAYS sanitize: never trust caller-supplied slug/date verbatim, since
@@ -326,18 +312,18 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 		slug = slugify(in.Title)
 	}
 	if slug == "" {
-		return "", http.StatusBadRequest, fmt.Errorf("could not derive slug (title empty?)")
+		return "", "", http.StatusBadRequest, fmt.Errorf("could not derive slug (title empty?)")
 	}
 	date := in.Date
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
 	}
 	if !validDate(date) {
-		return "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
+		return "", "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
 	if in.PublishAt != "" {
 		if _, err := time.Parse(time.RFC3339, in.PublishAt); err != nil {
-			return "", http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
+			return "", "", http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
 		}
 	}
 	// A slug collision must be detected against every existing post, not just
@@ -345,23 +331,24 @@ func (d *Deps) createArticle(in articleInput) (string, int, error) {
 	// different dates would silently overwrite each other's rendered page.
 	existing, err := d.findArticleBySlug(slug)
 	if err != nil {
-		return "", http.StatusInternalServerError, err
+		return "", "", http.StatusInternalServerError, err
 	}
 	if existing != nil {
-		return "", http.StatusConflict, fmt.Errorf("article %q already exists", slug)
+		return "", "", http.StatusConflict, fmt.Errorf("article %q already exists", slug)
 	}
 	path := filepath.Join(d.postsDir(), date+"-"+slug+".md")
 	after := []byte(renderArticleFile(in, date))
 	if err := writeFileAtomic(path, after); err != nil {
-		return "", http.StatusInternalServerError, err
+		return "", "", http.StatusInternalServerError, err
 	}
 	if err := d.Engine.Rebuild(); err != nil {
 		_ = os.Remove(path)
-		return "", http.StatusInternalServerError, err
+		return "", "", http.StatusInternalServerError, err
 	}
+	revision := revisionOf(after)
 	d.recordArticleAudit(store.ArticleAudit{Actor: mutationActor(in.Actor), Action: "create", Slug: slug,
-		SourceName: filepath.Base(path), AfterRevision: revisionOf(after), AfterSource: after})
-	return slug, http.StatusCreated, nil
+		SourceName: filepath.Base(path), AfterRevision: revision, AfterSource: after})
+	return slug, revision, http.StatusCreated, nil
 }
 
 // writeFileAtomic writes to a temp file in the destination directory and
@@ -394,7 +381,7 @@ func writeFileAtomic(path string, data []byte) error {
 
 // updateArticle overwrites an existing post file (matched by slug) and
 // rebuilds. If in.Date is empty, the original date is preserved.
-func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
+func (d *Deps) updateArticle(slug string, in articleInput) (string, int, error) {
 	// Same lock as createArticle and deleteArticle, which mux.go has always
 	// claimed covered all three. It did not: this function looks the article
 	// up, overwrites its file and then renames it, so a create running
@@ -405,37 +392,37 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	defer d.postMu.Unlock()
 	a, err := d.findArticleBySlug(slug)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return "", http.StatusInternalServerError, err
 	}
 	if a == nil {
-		return http.StatusNotFound, fmt.Errorf("article %q not found", slug)
+		return "", http.StatusNotFound, fmt.Errorf("article %q not found", slug)
 	}
 	if in.ExpectedRevision != "" && in.ExpectedRevision != a.Revision {
-		return http.StatusConflict, fmt.Errorf("article changed: expected revision %s, current revision %s", in.ExpectedRevision, a.Revision)
+		return "", http.StatusConflict, fmt.Errorf("article changed: expected revision %s, current revision %s", in.ExpectedRevision, a.Revision)
 	}
 	date := in.Date
 	if date == "" {
 		date = a.Date.Format("2006-01-02")
 	}
 	if !validDate(date) {
-		return http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
+		return "", http.StatusBadRequest, fmt.Errorf("invalid date %q (want YYYY-MM-DD)", date)
 	}
 	if strings.TrimSpace(in.Title) == "" {
-		return http.StatusBadRequest, fmt.Errorf("title is required")
+		return "", http.StatusBadRequest, fmt.Errorf("title is required")
 	}
 	if in.PublishAt != "" {
 		if _, err := time.Parse(time.RFC3339, in.PublishAt); err != nil {
-			return http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
+			return "", http.StatusBadRequest, fmt.Errorf("invalid publish_at: %w", err)
 		}
 	}
 	before, err := os.ReadFile(a.SourcePath)
 	if err != nil {
-		return http.StatusInternalServerError, err
+		return "", http.StatusInternalServerError, err
 	}
 	in.Updated = time.Now().UTC().Format(time.RFC3339)
 	after := []byte(renderArticleFile(in, date))
 	if err := writeFileAtomic(a.SourcePath, after); err != nil {
-		return http.StatusInternalServerError, err
+		return "", http.StatusInternalServerError, err
 	}
 	// Keep the filename's date prefix in step with the frontmatter date, so
 	// content/posts stays sorted and self-describing after a date edit. The
@@ -451,12 +438,13 @@ func (d *Deps) updateArticle(slug string, in articleInput) (int, error) {
 	if err := d.Engine.Rebuild(); err != nil {
 		_ = os.Remove(finalPath)
 		_ = writeFileAtomic(a.SourcePath, before)
-		return http.StatusInternalServerError, err
+		return "", http.StatusInternalServerError, err
 	}
+	revision := revisionOf(after)
 	d.recordArticleAudit(store.ArticleAudit{Actor: mutationActor(in.Actor), Action: "update", Slug: slug,
-		SourceName: filepath.Base(a.SourcePath), BeforeRevision: a.Revision, AfterRevision: revisionOf(after),
+		SourceName: filepath.Base(a.SourcePath), BeforeRevision: a.Revision, AfterRevision: revision,
 		BeforeSource: before, AfterSource: after})
-	return http.StatusOK, nil
+	return revision, http.StatusOK, nil
 }
 
 // deleteArticle removes the post file matching slug and rebuilds.

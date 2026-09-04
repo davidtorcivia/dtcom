@@ -451,7 +451,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 				return nil, articleResult{}, err
 			}
 		}
-		slug, status, err := d.createArticle(articleInput{
+		slug, revision, status, err := d.createArticle(articleInput{
 			Title:       args.Title,
 			Slug:        args.Slug,
 			Date:        args.Date,
@@ -466,7 +466,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("create failed (%d): %w", status, err)
 		}
-		return nil, articleResult{Slug: slug, Status: "created", Revision: d.currentArticleRevision(slug)}, nil
+		return nil, articleResult{Slug: slug, Status: "created", Revision: revision}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -490,7 +490,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 				return nil, articleResult{}, err
 			}
 		}
-		status, err := d.updateArticle(args.Slug, articleInput{
+		revision, status, err := d.updateArticle(args.Slug, articleInput{
 			Title:            orKeep(args.Title, a.Title),
 			Date:             args.Date,
 			Description:      orKeep(args.Description, a.Description),
@@ -506,7 +506,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		if err != nil {
 			return nil, articleResult{}, fmt.Errorf("update failed (%d): %w", status, err)
 		}
-		return nil, articleResult{Slug: args.Slug, Status: "updated", Revision: d.currentArticleRevision(args.Slug)}, nil
+		return nil, articleResult{Slug: args.Slug, Status: "updated", Revision: revision}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -546,7 +546,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 			return nil, patchResult{}, fmt.Errorf(
 				"find text appears %d times in %q; give more surrounding text to pin one, or set all", n, args.Slug)
 		}
-		status, err := d.updateArticle(args.Slug, articleInput{
+		revision, status, err := d.updateArticle(args.Slug, articleInput{
 			Title:            a.Title,
 			Description:      a.Description,
 			Tags:             a.Tags,
@@ -561,7 +561,7 @@ func registerArticleTools(srv *mcp.Server, d *Deps) {
 		if err != nil {
 			return nil, patchResult{}, fmt.Errorf("patch failed (%d): %w", status, err)
 		}
-		return nil, patchResult{Slug: args.Slug, Status: "patched", Replacements: n, Revision: d.currentArticleRevision(args.Slug)}, nil
+		return nil, patchResult{Slug: args.Slug, Status: "patched", Replacements: n, Revision: revision}, nil
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
