@@ -7,6 +7,7 @@ const editor = document.querySelector(".background-editor");
 let config = JSON.parse(editor.dataset.backgroundConfig) || defaults(),
   key = "desktopLight",
   preview = null,
+  previewTime = 0,
   dirty = false,
   revision = 0;
 config.presets ||= [];
@@ -101,7 +102,7 @@ function fit() {
   const height = Math.round(available.height / scale);
   $("frame").style.cssText =
     `width:${width}px;height:${height}px;transform:scale(${scale});left:${Math.max(0, (available.width - width * scale) / 2)}px`;
-  $("size").textContent = Math.round(width) + " × " + height;
+  $("size").textContent = Math.round(width) + " Ã— " + height;
 }
 function panel(open, focus = true) {
   $("panel").hidden = !open;
@@ -155,6 +156,7 @@ function sync() {
   preview?.update();
 }
 function loadPreview() {
+  previewTime = preview?.getTime() ?? previewTime;
   preview?.destroy();
   preview = null;
   const slug = $("page").value === "article" ? $("article").value.trim() : "";
@@ -163,6 +165,7 @@ function loadPreview() {
     (slug ? "?article=" + encodeURIComponent(slug) : "");
 }
 function connectPreview() {
+  previewTime = preview?.getTime() ?? previewTime;
   preview?.destroy();
   preview = null;
   const doc = $("frame").contentDocument;
@@ -175,7 +178,11 @@ function connectPreview() {
   doc.addEventListener("click", (e) => {
     if (e.target.closest("a")) e.preventDefault();
   });
-  preview = mountBackground(doc, () => (config.enabled ? profile() : null));
+  preview = mountBackground(
+    doc,
+    () => (config.enabled ? profile() : null),
+    previewTime,
+  );
   sync();
 }
 $("frame").addEventListener("load", connectPreview);
@@ -263,7 +270,7 @@ $("form").onsubmit = async (e) => {
   e.preventDefault();
   const version = revision;
   $("save").disabled = true;
-  status("Saving and rebuilding the siteâ€¦");
+  status("Saving and rebuilding the siteÃ¢â‚¬Â¦");
   try {
     const r = await fetch("/admin/site/background", {
       method: "POST",

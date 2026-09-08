@@ -587,15 +587,20 @@ function noiseTexture(doc) {
   tile.width = tile.height = 128;
   const ctx = tile.getContext("2d");
   const pixels = ctx.createImageData(128, 128);
+  // The same tile on every document prevents grain from reshuffling on navigation.
+  let seed = 173891;
   for (let i = 0; i < pixels.data.length; i += 4) {
-    const v = Math.random() * 255;
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    const v = (seed >>> 0) & 255;
     pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = v;
     pixels.data[i + 3] = 255;
   }
   ctx.putImageData(pixels, 0, 0);
   return (grainTexture = tile.toDataURL());
 }
-export function mountBackground(doc, getProfile) {
+export function mountBackground(doc, getProfile, initialTime = 0) {
   const win = doc.defaultView,
     canvas = doc.createElement("canvas");
   canvas.id = "site-background";
@@ -605,6 +610,7 @@ export function mountBackground(doc, getProfile) {
   grain.id = "site-background-grain";
   grain.setAttribute("aria-hidden", "true");
   grain.style.backgroundImage = "url(" + noiseTexture(doc) + ")";
+  grain.style.animationDelay = -(Date.now() % 500) / 1000 + "s";
   canvas.after(grain);
   const reduced = win.matchMedia("(prefers-reduced-motion: reduce)"),
     scheme = win.matchMedia("(prefers-color-scheme: dark)"),
@@ -614,7 +620,7 @@ export function mountBackground(doc, getProfile) {
     raf = 0,
     timer = 0,
     last = 0,
-    time = 0,
+    time = Number.isFinite(initialTime) && initialTime >= 0 ? initialTime : 0,
     dirty = true,
     lost = false,
     failed = false,
@@ -757,6 +763,12 @@ export function mountBackground(doc, getProfile) {
   update();
   return {
     update,
+    getTime: () => time,
+    resume(nextTime) {
+      if (Number.isFinite(nextTime) && nextTime >= 0 && nextTime < 1e7)
+        time = Math.max(time, nextTime);
+      update();
+    },
     destroy() {
       destroyed = true;
       stop();
@@ -776,14 +788,50 @@ const configElement = document.querySelector('meta[name="dt-background"]');
 if (configElement && !location.pathname.startsWith("/admin/")) {
   try {
     const config = JSON.parse(configElement.content);
-    if (config.enabled)
-      mountBackground(
+    if (config.enabled) {
+      const clockKey = "dt_background_clock_v1";
+      let initialTime = 0;
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(clockKey));
+        if (
+          saved &&
+          Number.isFinite(saved.time) &&
+          saved.time >= 0 &&
+          saved.time < 1e7
+        )
+          initialTime = saved.time;
+      } catch {
+        /* Storage is optional. */
+      }
+      const background = mountBackground(
         document,
         (mobile, dark) =>
           config.profiles[
             (mobile ? "mobile" : "desktop") + (dark ? "Dark" : "Light")
           ],
+        initialTime,
       );
+      const remember = () => {
+        try {
+          sessionStorage.setItem(
+            clockKey,
+            JSON.stringify({ time: background.getTime() }),
+          );
+        } catch {}
+      };
+      // No per-frame storage writes; pagehide also covers reloads and back/forward.
+      addEventListener("pagehide", remember);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) remember();
+      });
+      addEventListener("pageshow", () => {
+        let restored = initialTime;
+        try {
+          restored = JSON.parse(sessionStorage.getItem(clockKey))?.time;
+        } catch {}
+        background.resume(restored);
+      });
+    }
   } catch {
     /* The plain site remains usable without WebGL. */
   }

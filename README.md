@@ -133,7 +133,8 @@ the renderer and four profiles, without the editor or custom preset library.
 Rendering caps pixels at 900,000 on mobile and 2.4 million on desktop, compiles
 only the active design, and stops when hidden or still. A separate 128×128 grain
 texture animates at 24 stepped offsets per second without redrawing WebGL.
-Reduced motion freezes both layers; printing hides them. Missing WebGL leaves
+Animation position is retained across page navigation in tab-scoped session storage,
+with no per-frame storage writes. Reduced motion freezes both layers; printing hides them. Missing WebGL leaves
 the plain site usable.
 
 ### Analytics
