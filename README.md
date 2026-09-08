@@ -120,7 +120,9 @@ structure, motion, reading space, grain, line controls, and resolution.
 Mobile applies through 768 CSS pixels. Reading space fades the composition
 without moving it.
 
-Preview the actual homepage or an article by slug. Save named custom presets
+Preview the actual homepage or an article by slug across the full editor window.
+A floating control panel can be minimized (or dismissed with Escape) without
+resizing the preview. Save named custom presets
 to reuse a configuration (up to 20), or explicitly copy a configuration to all
 four contexts. **Save backgrounds** writes `content/site.yml` and rebuilds the
 site; edits remain in the preview until then. The preview is authenticated,

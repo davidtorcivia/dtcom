@@ -2,37 +2,39 @@
 {{template "admin-header" .}}
 <link rel="stylesheet" href="{{asset "/static/background-admin.css"}}">
 <script type="module" data-background-renderer="{{asset "/static/background.js"}}" src="{{asset "/static/background-admin.js"}}"></script>
-<main class="admin-main background-editor" data-background-config="{{.Background}}">
-<p class="admin-hint"><a href="/admin/site">Site settings</a> / Background</p>
-<h2 class="admin-h2">Background</h2>
-<p class="admin-hint">Light, color, and motion behind the page. Each screen size and theme has its own settings.</p>
-<noscript><p>Enable JavaScript to preview and edit shader backgrounds.</p></noscript>
+<main class="background-editor" data-background-config="{{.Background}}">
+<header class="background-bar">
+<a href="/admin/site" aria-label="Back to site settings">← Site</a><span class="background-bar-title">Background</span>
+<div class="background-page-controls"><label class="admin-sr-only" for="background-page">Preview page</label><select id="background-page"><option value="">Homepage</option><option value="article">Article</option></select><input id="background-article" aria-label="Article slug" value="steadq" placeholder="Article slug" hidden><button type="button" id="background-load">Load</button></div>
+<output id="background-size" aria-label="Preview dimensions"></output>
+</header>
+<section id="background-frame-wrap" aria-label="Live site preview"><iframe id="background-frame" title="Live background preview" src="/admin/site/background/preview"></iframe></section>
+<button id="background-launch" type="button" aria-controls="background-panel" aria-expanded="true" hidden>Background <span aria-hidden="true">↗</span></button>
+<aside id="background-panel" aria-label="Background controls">
 <form id="background-form">
-<div class="background-toolbar"><label><input type="checkbox" id="background-enabled"> Enable shader backgrounds</label><button class="admin-btn" id="background-save" disabled>Save backgrounds</button></div>
-<p id="background-status" class="admin-hint" role="status" aria-live="polite"></p>
-<div class="background-grid">
-<section class="background-controls" aria-label="Background settings">
+<div class="background-panel-head"><span>Background studio</span><button id="background-minimize" type="button" aria-label="Minimize background controls" title="Minimize · Esc">−</button></div>
+<div class="background-panel-body">
+<div class="background-enable"><label><input type="checkbox" id="background-enabled"> Enable backgrounds</label><span>Site-wide</span></div>
 <label class="admin-label" for="background-context">Editing</label>
-<select id="background-context" class="admin-input"><option value="desktopLight">Desktop · Light</option><option value="desktopDark">Desktop · Dark</option><option value="mobileLight">Mobile · Light</option><option value="mobileDark">Mobile · Dark</option></select>
-<label class="admin-label" for="background-preset">Starting point</label>
-<div class="background-row"><select id="background-preset" class="admin-input"></select><button type="button" id="background-apply">Apply</button></div>
-<div class="background-row"><button type="button" id="background-store">Save custom preset</button><button type="button" id="background-delete">Delete preset</button></div>
+<select id="background-context"><option value="desktopLight">Desktop · Light</option><option value="desktopDark">Desktop · Dark</option><option value="mobileLight">Mobile · Light</option><option value="mobileDark">Mobile · Dark</option></select>
 <label class="admin-label" for="background-design">Design</label>
-<select id="background-design" class="admin-input"><option value="1">Overprint</option><option value="3">Lensing</option><option value="4">Filament</option></select>
-<label class="admin-label" for="background-palette">Palette</label><select id="background-palette" class="admin-input"></select>
-<div id="background-colors" class="background-row"></div>
+<select id="background-design" class="admin-sr-only"><option value="1">Overprint</option><option value="3">Lensing</option><option value="4">Filament</option></select>
+<div class="background-designs" aria-label="Design"><button type="button" data-design="1">Overprint</button><button type="button" data-design="3">Lensing</button><button type="button" data-design="4">Filament</button></div>
+<div class="background-palette-row"><label for="background-palette">Palette</label><select id="background-palette"></select><div id="background-colors"></div></div>
 <div id="background-sliders"></div>
-<label class="admin-label" for="background-quality">Resolution</label><select id="background-quality" class="admin-input"><option value="0.65">Economy</option><option value="1">Balanced</option><option value="1.5">Fine</option></select>
-<p class="admin-hint">Mobile applies through 768px. Reading space fades the background without moving it. Motion respects the visitor’s reduced-motion preference.</p>
-<button type="button" id="background-copy">Copy this configuration to all four contexts</button>
-</section>
-<section class="background-preview" aria-label="Live site preview">
-<div class="background-row"><label for="background-page">Preview</label><select id="background-page"><option value="">Homepage</option><option value="article">Article</option></select><input id="background-article" aria-label="Article slug" value="steadq" placeholder="Article slug" hidden><button type="button" id="background-load">Load</button></div>
-<p class="admin-hint">Changes stay in this preview until you save. Scroll inside the page to check readability.</p>
-<div id="background-frame-wrap"><iframe id="background-frame" title="Live background preview" src="/admin/site/background/preview"></iframe></div>
-</section>
+<details class="background-advanced"><summary>Presets &amp; rendering</summary>
+<label class="admin-label" for="background-preset">Saved presets</label>
+<div class="background-row"><select id="background-preset"></select><button type="button" id="background-apply">Apply</button></div>
+<div class="background-row"><button type="button" id="background-store">Save custom preset</button><button type="button" id="background-delete">Delete</button></div>
+<label class="admin-label" for="background-quality">Resolution</label><select id="background-quality"><option value="0.65">Economy</option><option value="1">Balanced</option><option value="1.5">Fine</option></select>
+<button type="button" id="background-copy">Copy to all four contexts</button>
+<p class="background-note">Mobile: up to 768px. Reading space fades the art without moving it.</p>
+</details>
 </div>
+<footer class="background-panel-foot"><p id="background-status" role="status" aria-live="polite">Preview only until saved.</p><button id="background-save" disabled>Save backgrounds</button></footer>
 </form>
+</aside>
+<noscript><p class="background-nojs">Enable JavaScript to edit backgrounds. <a href="/admin/site">Back to settings</a></p></noscript>
 </main>
 {{template "admin-footer" .}}
 {{end}}

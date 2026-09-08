@@ -92,24 +92,52 @@ for (const [name, label, min, max, mode] of specs) {
   };
 }
 function fit() {
-  const mobile = key.startsWith("mobile"),
-    width = mobile ? 390 : 1100,
-    height = mobile ? 844 : 820;
-  const scale = Math.min(1, $("frame-wrap").clientWidth / width);
+  const mobile = key.startsWith("mobile");
+  const available = $("frame-wrap").getBoundingClientRect();
+  const width = mobile
+    ? Math.min(390, available.width)
+    : Math.max(769, available.width);
+  const scale = Math.min(1, available.width / width);
+  const height = Math.round(available.height / scale);
   $("frame").style.cssText =
-    "width:" +
-    width +
-    "px;height:" +
-    height +
-    "px;transform:scale(" +
-    scale +
-    ")";
-  $("frame-wrap").style.height = height * scale + "px";
-  $("frame").style.marginLeft =
-    Math.max(0, ($("frame-wrap").clientWidth - width * scale) / 2) + "px";
+    `width:${width}px;height:${height}px;transform:scale(${scale});left:${Math.max(0, (available.width - width * scale) / 2)}px`;
+  $("size").textContent = Math.round(width) + " × " + height;
 }
+function panel(open, focus = true) {
+  $("panel").hidden = !open;
+  $("launch").hidden = open;
+  $("launch").setAttribute("aria-expanded", String(open));
+  if (focus) (open ? $("minimize") : $("launch")).focus();
+  try {
+    sessionStorage.setItem("dt_background_panel", open ? "open" : "closed");
+  } catch {}
+}
+$("minimize").onclick = () => panel(false);
+$("launch").onclick = () => panel(true);
+function escapePanel(e) {
+  if (e.key === "Escape" && !$("panel").hidden) panel(false);
+}
+addEventListener("keydown", escapePanel);
+try {
+  panel(sessionStorage.getItem("dt_background_panel") !== "closed", false);
+} catch {}
+for (const button of document.querySelectorAll("[data-design]"))
+  button.onclick = () => {
+    $("design").value = button.dataset.design;
+    $("design").dispatchEvent(new Event("change"));
+  };
+
 function sync() {
   const p = profile();
+  document.documentElement.dataset.theme = isDark() ? "dark" : "light";
+  document
+    .querySelectorAll("[data-design]")
+    .forEach((b) =>
+      b.setAttribute(
+        "aria-pressed",
+        String(Number(b.dataset.design) === p.mode),
+      ),
+    );
   $("enabled").checked = config.enabled;
   $("design").value = p.mode;
   $("palette").value = p.palette;
@@ -143,6 +171,7 @@ function connectPreview() {
     return;
   }
   doc.documentElement.dataset.theme = isDark() ? "dark" : "light";
+  doc.addEventListener("keydown", escapePanel);
   doc.addEventListener("click", (e) => {
     if (e.target.closest("a")) e.preventDefault();
   });
@@ -234,7 +263,7 @@ $("form").onsubmit = async (e) => {
   e.preventDefault();
   const version = revision;
   $("save").disabled = true;
-  status("Saving and rebuilding the site…");
+  status("Saving and rebuilding the siteâ€¦");
   try {
     const r = await fetch("/admin/site/background", {
       method: "POST",
