@@ -104,6 +104,24 @@ func (e *Engine) Preview(a Article) ([]byte, error) {
 	}))
 }
 
+// PreviewHome renders the real homepage without analytics or publishing drafts.
+func (e *Engine) PreviewHome() ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	articles, err := LoadArticles(e.cfg.PostsDir)
+	if err != nil {
+		return nil, err
+	}
+	published := make([]Article, 0, len(articles))
+	now := time.Now()
+	for _, a := range articles {
+		if !a.Draft && (a.PublishAt.IsZero() || !a.PublishAt.After(now)) {
+			published = append(published, a)
+		}
+	}
+	return e.tmpls.execute("home", e.pageVars(e.cfg.Site(), map[string]any{"Articles": published, "Preview": true}))
+}
+
 // NewEngine builds an engine and loads its templates. A template parse error
 // is returned rather than swallowed: every page render would fail on a nil
 // template, and the failure is far easier to act on at startup than as a

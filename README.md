@@ -110,6 +110,30 @@ Restoring is on the same page, behind typing the archive's date, and takes a fre
 
 The canonical URL is the one exception: `DTCOM_BASE_URL` wins over `site.yml`'s `base_url`, so the feed, sitemap, and OG tags can't disagree with the deployment.
 
+### Backgrounds
+
+**Site settings → Background** (`/admin/site/background`) enables Overprint,
+Lensing, or Filament behind the public site. Backgrounds start disabled.
+Choose Desktop Light, Desktop Dark, Mobile Light, or Mobile Dark to edit its
+complete configuration: design, palette/custom colors, presence, scale,
+structure, motion, reading space, grain, line controls, and resolution.
+Mobile applies through 768 CSS pixels. Reading space fades the composition
+without moving it.
+
+Preview the actual homepage or an article by slug. Save named custom presets
+to reuse a configuration (up to 20), or explicitly copy a configuration to all
+four contexts. **Save backgrounds** writes `content/site.yml` and rebuilds the
+site; edits remain in the preview until then. The preview is authenticated,
+same-origin only, and excludes analytics.
+
+Public pages load no shader assets when disabled. When enabled, they load only
+the renderer and four profiles, without the editor or custom preset library.
+Rendering caps pixels at 900,000 on mobile and 2.4 million on desktop, compiles
+only the active design, and stops when hidden or still. A separate 128×128 grain
+texture animates at 24 stepped offsets per second without redrawing WebGL.
+Reduced motion freezes both layers; printing hides them. Missing WebGL leaves
+the plain site usable.
+
 ### Analytics
 
 An optional third-party tracker, set on the admin Site page or in `site.yml` directly. Umami, Plausible, Fathom and GoatCounter are all one script tag with some `data-*` attributes, so that is what the config models rather than a list of providers:

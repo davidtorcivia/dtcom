@@ -14,6 +14,7 @@ import (
 )
 
 type Config struct {
+	Background  *Background  `yaml:"background,omitempty" json:"Background,omitempty"`
 	Title       string       `yaml:"title"`
 	Author      string       `yaml:"author"`
 	BaseURL     string       `yaml:"base_url"`
@@ -270,6 +271,9 @@ func Load(path string) (*Config, error) {
 // readers (the watcher's rebuild, concurrent requests) must never observe a
 // half-written file.
 func Save(path string, c *Config) error {
+	if err := ValidateBackground(c.Background); err != nil {
+		return err
+	}
 	out, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal site.yml: %w", err)

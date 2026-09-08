@@ -2,6 +2,7 @@
 {{template "admin-header" .}}
 <main class="admin-main">
 <h2 class="admin-h2">Site Config</h2>
+<p><a href="/admin/site/background">Background →</a> — shader presets, colors, and motion.</p>
 {{with .Error}}<p class="admin-error" role="alert">{{.}}</p>{{end}}
 
 {{/* Its own form: this one posts multipart to a different endpoint, and the

@@ -24,6 +24,10 @@
   <link rel="webmention" href="/webmention">
   {{with .PGP}}<link rel="pgpkey" type="application/pgp-keys" href="/pgp.asc">{{end}}
   <script src="{{asset "/static/app.js"}}" defer></script>
+  {{with .Site.Background}}{{if .Enabled}}
+  <meta name="dt-background" content="{{.PublicJSON}}">
+  <script type="module" src="{{asset "/static/background.js"}}"></script>
+  {{end}}{{end}}
   {{/* The optional third-party tracker from site.yml. Built in Go rather than
        here because the data-* attribute names are configuration, and a template
        can escape an attribute's value but cannot template its name. Emits

@@ -1931,3 +1931,15 @@ footer.site-footer {
     padding-left: 0;
   }
 }
+
+/* Decorative background sits behind all content and never captures input. */
+#site-background{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+body:has(> #site-background) > .site-container{position:relative;z-index:1}
+@media print{#site-background{display:none}}
+
+#site-background-grain{position:fixed;inset:-128px;pointer-events:none;z-index:0;background-repeat:repeat}
+#site-background-grain[hidden]{display:none}
+#site-background-grain.is-moving{will-change:transform;animation:background-grain .5s steps(1,end) infinite}
+@keyframes background-grain{0%{transform:translate(0,0)}8.333%{transform:translate(37px,-53px)}16.667%{transform:translate(-71px,19px)}25%{transform:translate(13px,83px)}33.333%{transform:translate(-43px,-29px)}41.667%{transform:translate(61px,47px)}50%{transform:translate(-17px,97px)}58.333%{transform:translate(89px,-11px)}66.667%{transform:translate(-59px,67px)}75%{transform:translate(23px,-79px)}83.333%{transform:translate(-101px,-37px)}91.667%{transform:translate(73px,31px)}}
+@media(prefers-reduced-motion:reduce){#site-background-grain.is-moving{animation:none;will-change:auto}}
+@media print{#site-background-grain{display:none}}

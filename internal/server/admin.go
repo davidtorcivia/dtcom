@@ -24,6 +24,9 @@ const maxAdminForm = 10 << 20
 // registerAdmin wires the session-cookie-authenticated admin UI. Every route
 // other than the login form/login POST is wrapped in requireAuth.
 func registerAdmin(mux *http.ServeMux, d *Deps) {
+	mux.HandleFunc("GET /admin/site/background", d.requireAuth(d.adminBackground))
+	mux.HandleFunc("POST /admin/site/background", d.requireAuth(d.adminBackgroundSave))
+	mux.HandleFunc("GET /admin/site/background/preview", d.requireAuth(d.adminBackgroundPreview))
 	mux.HandleFunc("GET /admin/login", d.adminLoginForm)
 	mux.HandleFunc("POST /admin/login", d.adminLogin)
 	mux.HandleFunc("POST /admin/logout", d.requireAuth(d.adminLogout))

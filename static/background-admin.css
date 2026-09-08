@@ -1,0 +1,104 @@
+.background-editor {
+  max-width: none;
+}
+.background-toolbar,
+.background-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.background-toolbar {
+  justify-content: space-between;
+}
+.background-grid {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 32px;
+  margin-top: 24px;
+}
+.background-controls {
+  min-width: 0;
+}
+.background-controls .admin-input {
+  width: 100%;
+  min-width: 0;
+}
+.background-row select {
+  flex: 1;
+  min-width: 100px;
+}
+.background-row button,
+.background-controls > button {
+  padding: 8px;
+  border: 1px solid var(--border-color, var(--text-muted));
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: 11px var(--font-mono);
+}
+.background-controls label {
+  font: 11px var(--font-mono);
+}
+.background-controls input[type="range"] {
+  width: 100%;
+  accent-color: var(--text);
+  min-height: 28px;
+}
+.background-control {
+  display: block;
+  margin: 14px 0;
+}
+.background-control[hidden] {
+  display: none;
+}
+.background-control span {
+  display: flex;
+  justify-content: space-between;
+}
+.background-controls input[type="color"] {
+  width: 38px;
+  height: 28px;
+  border: 0;
+  padding: 0;
+  background: none;
+}
+.background-preview {
+  min-width: 0;
+  position: sticky;
+  top: 20px;
+  align-self: start;
+}
+.background-preview input {
+  max-width: 160px;
+}
+#background-frame-wrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--text-muted);
+}
+#background-frame {
+  display: block;
+  border: 0;
+  transform-origin: top left;
+  background: white;
+}
+#background-status {
+  min-height: 1.5em;
+}
+#background-status[data-error="true"] {
+  color: #b54539;
+}
+@media (max-width: 850px) {
+  .background-grid {
+    grid-template-columns: 1fr;
+  }
+  .background-preview {
+    position: static;
+    grid-row: 1;
+  }
+  .background-controls {
+    max-width: 100%;
+  }
+}
